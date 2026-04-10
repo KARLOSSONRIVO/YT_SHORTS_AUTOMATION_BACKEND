@@ -1,3 +1,4 @@
+import path from "node:path";
 import cors from "cors";
 import express from "express";
 import type { Multer } from "multer";
@@ -12,6 +13,7 @@ export const createApp = (controllers: RouteControllers, uploadMiddleware: Multe
   app.use(cors());
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ extended: true }));
+  app.use("/media", express.static(path.resolve(env.STORAGE_ROOT), { fallthrough: true, index: false }));
 
   app.use(env.API_PREFIX, createApiRouter(controllers, uploadMiddleware));
   app.use(notFoundHandler);

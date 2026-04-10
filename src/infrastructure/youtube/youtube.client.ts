@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { google, type youtube_v3 } from "googleapis";
+import type { Credentials } from "google-auth-library";
 
 export interface YouTubeClientConfig {
   clientId: string;
@@ -39,8 +40,18 @@ export class YouTubeClient {
     return tokens;
   }
 
+  private toCredentials(tokens: YouTubeTokenSet): Credentials {
+    return {
+      access_token: tokens.access_token ?? undefined,
+      refresh_token: tokens.refresh_token ?? undefined,
+      expiry_date: tokens.expiry_date ?? undefined,
+      scope: tokens.scope ?? undefined,
+      token_type: tokens.token_type ?? undefined
+    };
+  }
+
   public async fetchChannelProfile(tokens: YouTubeTokenSet): Promise<youtube_v3.Schema$Channel> {
-    this.oauthClient.setCredentials(tokens);
+    this.oauthClient.setCredentials(this.toCredentials(tokens));
     const youtube = google.youtube({ version: "v3", auth: this.oauthClient });
     const response = await youtube.channels.list({
       part: ["snippet", "contentDetails"],
@@ -62,7 +73,7 @@ export class YouTubeClient {
     privacyStatus: "private" | "public" | "unlisted";
     videoPath: string;
   }): Promise<youtube_v3.Schema$Video> {
-    this.oauthClient.setCredentials(input.tokens);
+    this.oauthClient.setCredentials(this.toCredentials(input.tokens));
     const youtube = google.youtube({ version: "v3", auth: this.oauthClient });
 
     const response = await youtube.videos.insert({

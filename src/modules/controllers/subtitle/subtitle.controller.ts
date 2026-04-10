@@ -6,7 +6,7 @@ export class SubtitleController {
   constructor(private readonly subtitleService: SubtitleService) {}
 
   public getClipSubtitle = async (request: Request, response: Response): Promise<void> => {
-    const subtitle = await this.subtitleService.getClipSubtitle(request.params.clipId);
+    const subtitle = await this.subtitleService.getClipSubtitle(String(request.params.clipId));
     sendSuccess(response, subtitle);
   };
 }

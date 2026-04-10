@@ -6,6 +6,12 @@ export interface TranscriptSegmentInput {
   startTimeSeconds: number;
   endTimeSeconds: number;
   text: string;
+  words?: Array<{
+    startTimeSeconds: number;
+    endTimeSeconds: number;
+    word: string;
+    probability?: number;
+  }>;
 }
 
 export interface StoreTranscriptInput {
@@ -29,7 +35,10 @@ export class TranscriptService {
       sourceVideoId: input.sourceVideoId as never,
       language: input.language,
       rawText: input.rawText,
-      segments: input.segments,
+      segments: input.segments.map((segment) => ({
+        ...segment,
+        words: segment.words ?? []
+      })),
       provider: input.provider ?? "python-worker",
       status: "completed"
     });

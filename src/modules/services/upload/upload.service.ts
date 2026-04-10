@@ -10,6 +10,14 @@ export interface CreateUploadWorkflowInput {
   title: string;
   description?: string;
   file: Express.Multer.File;
+  fontFamily?: string;
+  fontSize?: number;
+  fillColor?: string;
+  strokeColor?: string;
+  highlightColor?: string;
+  position?: "bottom_center" | "top_center";
+  maxCharsPerLine?: number;
+  maxLines?: number;
 }
 
 export class UploadService {
@@ -26,7 +34,17 @@ export class UploadService {
     const project = await this.projectService.createProject({
       userId: input.userId,
       title: input.title,
-      description: input.description
+      description: input.description,
+      subtitlePreferences: {
+        fontFamily: input.fontFamily,
+        fontSize: input.fontSize,
+        fillColor: input.fillColor,
+        strokeColor: input.strokeColor,
+        highlightColor: input.highlightColor,
+        position: input.position,
+        maxCharsPerLine: input.maxCharsPerLine,
+        maxLines: input.maxLines
+      }
     });
 
     const sourceVideo = await this.sourceVideoService.createSourceVideo({

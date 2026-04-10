@@ -1,0 +1,98 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yt-shorts-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${PORT:-5001}
+      API_PREFIX: ${API_PREFIX:-/api}
+      MONGODB_URI: mongodb://mongo:27017/youtube_shorts_automation
+      REDIS_URL: redis://redis:6379
+      PYTHON_WORKER_BASE_URL: http://host.docker.internal:8000
+      STORAGE_ROOT: /app/storage
+      TEMP_UPLOAD_DIR: /app/storage/tmp
+      MAX_FILE_SIZE_BYTES: ${MAX_FILE_SIZE_BYTES:-1073741824}
+      FFMPEG_PATH: ${FFMPEG_PATH:-ffmpeg}
+      FFPROBE_PATH: ${FFPROBE_PATH:-ffprobe}
+      YOUTUBE_CLIENT_ID: ${YOUTUBE_CLIENT_ID}
+      YOUTUBE_CLIENT_SECRET: ${YOUTUBE_CLIENT_SECRET}
+      YOUTUBE_REDIRECT_URI: ${YOUTUBE_REDIRECT_URI:-http://localhost:5001/api/channel/oauth/callback}
+    ports:
+      - "${PORT:-5001}:5001"
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      mongo:
+        condition: service_started
+      redis:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  backend-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yt-shorts-backend-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["node", "dist/src/worker.js"]
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${PORT:-5001}
+      API_PREFIX: ${API_PREFIX:-/api}
+      MONGODB_URI: mongodb://mongo:27017/youtube_shorts_automation
+      REDIS_URL: redis://redis:6379
+      PYTHON_WORKER_BASE_URL: http://host.docker.internal:8000
+      STORAGE_ROOT: /app/storage
+      TEMP_UPLOAD_DIR: /app/storage/tmp
+      MAX_FILE_SIZE_BYTES: ${MAX_FILE_SIZE_BYTES:-1073741824}
+      FFMPEG_PATH: ${FFMPEG_PATH:-ffmpeg}
+      FFPROBE_PATH: ${FFPROBE_PATH:-ffprobe}
+      YOUTUBE_CLIENT_ID: ${YOUTUBE_CLIENT_ID}
+      YOUTUBE_CLIENT_SECRET: ${YOUTUBE_CLIENT_SECRET}
+      YOUTUBE_REDIRECT_URI: ${YOUTUBE_REDIRECT_URI:-http://localhost:5001/api/channel/oauth/callback}
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      mongo:
+        condition: service_started
+      redis:
+        condition: service_started
+      backend:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  mongo:
+    image: mongo:7
+    container_name: yt-shorts-mongo
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    environment:
+      MONGO_INITDB_DATABASE: youtube_shorts_automation
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: yt-shorts-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+volumes:
+  mongo_data:
+  redis_data:

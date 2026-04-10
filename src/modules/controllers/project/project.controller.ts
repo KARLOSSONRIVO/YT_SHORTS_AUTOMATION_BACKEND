@@ -6,12 +6,13 @@ export class ProjectController {
   constructor(private readonly projectService: ProjectService) {}
 
   public listProjects = async (request: Request, response: Response): Promise<void> => {
-    const projects = await this.projectService.listProjects(request.query.userId as string | undefined);
+    const userId = typeof request.query.userId === "string" ? request.query.userId : undefined;
+    const projects = await this.projectService.listProjects(userId);
     sendSuccess(response, projects);
   };
 
   public getProject = async (request: Request, response: Response): Promise<void> => {
-    const project = await this.projectService.getProjectOrThrow(request.params.projectId);
+    const project = await this.projectService.getProjectOrThrow(String(request.params.projectId));
     sendSuccess(response, project);
   };
 }

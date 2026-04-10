@@ -1,9 +1,17 @@
 import { HydratedDocument, Schema, Types, model } from "mongoose";
 
+export interface TranscriptWord {
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  word: string;
+  probability?: number;
+}
+
 export interface TranscriptSegment {
   startTimeSeconds: number;
   endTimeSeconds: number;
   text: string;
+  words: TranscriptWord[];
 }
 
 export interface Transcript {
@@ -16,11 +24,22 @@ export interface Transcript {
   status: "pending" | "completed" | "failed";
 }
 
+const transcriptWordSchema = new Schema<TranscriptWord>(
+  {
+    startTimeSeconds: { type: Number, required: true },
+    endTimeSeconds: { type: Number, required: true },
+    word: { type: String, required: true },
+    probability: { type: Number }
+  },
+  { _id: false }
+);
+
 const transcriptSegmentSchema = new Schema<TranscriptSegment>(
   {
     startTimeSeconds: { type: Number, required: true },
     endTimeSeconds: { type: Number, required: true },
-    text: { type: String, required: true }
+    text: { type: String, required: true },
+    words: { type: [transcriptWordSchema], default: [] }
   },
   { _id: false }
 );

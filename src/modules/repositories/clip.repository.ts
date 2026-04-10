@@ -2,7 +2,7 @@ import { ClipModel, type Clip, type ClipDocument } from "../models/clip.model";
 
 export class ClipRepository {
   public createMany(payload: Partial<Clip>[]): Promise<ClipDocument[]> {
-    return ClipModel.insertMany(payload);
+    return ClipModel.insertMany(payload) as Promise<ClipDocument[]>;
   }
 
   public findById(clipId: string): Promise<ClipDocument | null> {

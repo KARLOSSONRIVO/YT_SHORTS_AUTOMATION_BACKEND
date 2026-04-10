@@ -1,19 +1,27 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import { FfmpegClient } from "../../../infrastructure/ffmpeg/ffmpeg.client";
 import { QUEUE_NAMES } from "../../../infrastructure/queue/queue.names";
+import {
+  DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
+  type ProjectSubtitlePreferences
+} from "../../models/project.model";
+import { PythonWorkerClient } from "../../../infrastructure/pythonWorker/python-worker.client";
 import { ClipService } from "../clip/clip.service";
 import { JobService } from "../job/job.service";
+import { ProjectService } from "../project/project.service";
 import { QueueService } from "../queue/queue.service";
-import { StorageService } from "../storage/storage.service";
 import { SourceVideoService } from "../sourceVideo/source-video.service";
+import { StorageService } from "../storage/storage.service";
+import { TranscriptService } from "../transcript/transcript.service";
+
+const WORD_LEAD_IN_SECONDS = 0.35;
 
 export class RenderService {
   constructor(
-    private readonly ffmpegClient: FfmpegClient,
+    private readonly pythonWorkerClient: PythonWorkerClient,
     private readonly storageService: StorageService,
     private readonly sourceVideoService: SourceVideoService,
     private readonly clipService: ClipService,
+    private readonly transcriptService: TranscriptService,
+    private readonly projectService: ProjectService,
     private readonly jobService: JobService,
     private readonly queueService: QueueService
   ) {}
@@ -37,30 +45,75 @@ export class RenderService {
     return persistedJob;
   }
 
+  private buildTranscriptPayload(transcript: Awaited<ReturnType<TranscriptService["getByProjectIdOrThrow"]>>) {
+    const transcriptDurationSeconds =
+      transcript.segments[transcript.segments.length - 1]?.endTimeSeconds ?? 0;
+
+    return {
+      language: transcript.language,
+      duration: transcriptDurationSeconds,
+      full_text: transcript.rawText,
+      segments: transcript.segments.map((segment) => ({
+        start: segment.startTimeSeconds,
+        end: segment.endTimeSeconds,
+        text: segment.text,
+        words: segment.words.map((word) => ({
+          start: word.startTimeSeconds,
+          end: word.endTimeSeconds,
+          word: word.word,
+          probability: word.probability
+        }))
+      }))
+    };
+  }
+
+  private buildSubtitlePreferences(
+    projectSubtitlePreferences?: Partial<ProjectSubtitlePreferences>
+  ): ProjectSubtitlePreferences {
+    return {
+      ...DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
+      ...(projectSubtitlePreferences ?? {})
+    };
+  }
+
   public async renderClip(projectId: string, clipId: string) {
-    const clip = await this.clipService.getClipOrThrow(clipId);
-    const sourceVideo = await this.sourceVideoService.getByProjectIdOrThrow(projectId);
+    const [clip, sourceVideo, transcript, project] = await Promise.all([
+      this.clipService.getClipOrThrow(clipId),
+      this.sourceVideoService.getByProjectIdOrThrow(projectId),
+      this.transcriptService.getByProjectIdOrThrow(projectId),
+      this.projectService.getProjectOrThrow(projectId)
+    ]);
 
     const sourcePath = this.storageService.resolveStoragePath(sourceVideo.storageKey);
-    const renderStorageKey = this.storageService.buildRenderStorageKey(projectId, clipId);
-    const outputPath = this.storageService.resolveStoragePath(renderStorageKey);
-
-    await fs.mkdir(path.dirname(outputPath), { recursive: true });
-    await this.ffmpegClient.renderClip({
-      inputPath: sourcePath,
-      outputPath,
-      startTimeSeconds: clip.startTimeSeconds,
-      durationSeconds: clip.durationSeconds,
-      subtitlePath: clip.subtitleStorageKey
-        ? this.storageService.resolveStoragePath(clip.subtitleStorageKey)
-        : undefined
+    const subtitlePreferences = this.buildSubtitlePreferences(project.subtitlePreferences);
+    const pythonRenderResult = await this.pythonWorkerClient.requestRenderedClipUpload({
+      jobId: clipId,
+      filePath: sourcePath,
+      fileName: sourceVideo.originalFileName,
+      mimeType: sourceVideo.mimeType,
+      clipStart: Math.max(clip.startTimeSeconds - WORD_LEAD_IN_SECONDS, 0),
+      clipEnd: clip.endTimeSeconds,
+      titleHint: clip.title,
+      score: clip.score,
+      transcriptJson: JSON.stringify(this.buildTranscriptPayload(transcript)),
+      fontFamily: subtitlePreferences.fontFamily,
+      fontSize: subtitlePreferences.fontSize,
+      fillColor: subtitlePreferences.fillColor,
+      strokeColor: subtitlePreferences.strokeColor,
+      highlightColor: subtitlePreferences.highlightColor,
+      position: subtitlePreferences.position,
+      maxCharsPerLine: subtitlePreferences.maxCharsPerLine,
+      maxLines: subtitlePreferences.maxLines
     });
 
-    await this.clipService.markRendered(clipId, renderStorageKey);
+    const renderedVideoBuffer = await this.pythonWorkerClient.downloadBinary(pythonRenderResult.video_url);
+    const storedRender = await this.storageService.saveRenderedClip(projectId, clipId, renderedVideoBuffer);
+
+    await this.clipService.markRendered(clipId, storedRender.storageKey);
 
     return {
       clipId,
-      outputStorageKey: renderStorageKey
+      outputStorageKey: storedRender.storageKey
     };
   }
 }

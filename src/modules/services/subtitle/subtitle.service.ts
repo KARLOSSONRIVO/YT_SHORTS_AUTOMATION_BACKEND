@@ -1,7 +1,37 @@
+import fs from "node:fs/promises";
 import { NotFoundError } from "../../../common/errors/not-found-error";
 import { ClipRepository } from "../../repositories/clip.repository";
 import { StorageService } from "../storage/storage.service";
 import { ClipService } from "../clip/clip.service";
+
+const parseSrtTimestamp = (value: string): number => {
+  const [timePart, millisecondsPart = "0"] = value.split(",");
+  const [hours = "0", minutes = "0", seconds = "0"] = timePart.split(":");
+  return (
+    Number(hours) * 3600 +
+    Number(minutes) * 60 +
+    Number(seconds) +
+    Number(millisecondsPart) / 1000
+  );
+};
+
+const parseSrtSegments = (content: string) => {
+  return content
+    .split(/\r?\n\r?\n/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      const lines = block.split(/\r?\n/).filter(Boolean);
+      const timeLine = lines[1] ?? "";
+      const [startRaw = "", endRaw = ""] = timeLine.split(" --> ");
+      return {
+        start: parseSrtTimestamp(startRaw),
+        end: parseSrtTimestamp(endRaw),
+        text: lines.slice(2).join(" ")
+      };
+    })
+    .filter((segment) => segment.text.length > 0);
+};
 
 export class SubtitleService {
   constructor(
@@ -26,10 +56,15 @@ export class SubtitleService {
       throw new NotFoundError("Subtitle not found for clip.", { clipId });
     }
 
+    const absolutePath = this.storageService.resolveStoragePath(clip.subtitleStorageKey);
+    const content = await fs.readFile(absolutePath, "utf8");
+
     return {
       clipId,
       storageKey: clip.subtitleStorageKey,
-      absolutePath: this.storageService.resolveStoragePath(clip.subtitleStorageKey)
+      absolutePath,
+      content,
+      segments: parseSrtSegments(content)
     };
   }
 }

@@ -38,6 +38,7 @@ import { StorageService } from "../modules/services/storage/storage.service";
 import { SubtitleService } from "../modules/services/subtitle/subtitle.service";
 import { TranscriptService } from "../modules/services/transcript/transcript.service";
 import { UploadService } from "../modules/services/upload/upload.service";
+import { WorkflowOrchestratorService } from "../modules/services/workflow/workflow-orchestrator.service";
 import { YouTubeService } from "../modules/services/youtube/youtube.service";
 
 export const createApplicationContainer = async () => {
@@ -47,7 +48,10 @@ export const createApplicationContainer = async () => {
   const queues = createQueues(redisConnection);
   const storageClient = new LocalStorageClient(env.STORAGE_ROOT);
   const ffmpegClient = new FfmpegClient(env.FFMPEG_PATH);
-  const pythonWorkerClient = new PythonWorkerClient(env.PYTHON_WORKER_BASE_URL);
+  const configuredPythonWorkerClient = new PythonWorkerClient(
+    env.PYTHON_WORKER_BASE_URL,
+    env.PYTHON_WORKER_TIMEOUT_MS
+  );
   const youTubeClient = new YouTubeClient({
     clientId: env.YOUTUBE_CLIENT_ID,
     clientSecret: env.YOUTUBE_CLIENT_SECRET,
@@ -70,7 +74,7 @@ export const createApplicationContainer = async () => {
   const authService = new AuthService(userRepository);
   const projectService = new ProjectService(projectRepository);
   const sourceVideoService = new SourceVideoService(sourceVideoRepository);
-  const transcriptService = new TranscriptService(transcriptRepository, pythonWorkerClient);
+  const transcriptService = new TranscriptService(transcriptRepository, configuredPythonWorkerClient);
   const clipService = new ClipService(clipRepository);
   const queueService = new QueueService(queues);
   const jobService = new JobService(jobRepository);
@@ -82,10 +86,12 @@ export const createApplicationContainer = async () => {
     jobService
   );
   const renderService = new RenderService(
-    ffmpegClient,
+    configuredPythonWorkerClient,
     storageService,
     sourceVideoService,
     clipService,
+    transcriptService,
+    projectService,
     jobService,
     queueService
   );
@@ -100,6 +106,19 @@ export const createApplicationContainer = async () => {
     uploadHistoryRepository,
     jobService,
     queueService
+  );
+  const workflowOrchestratorService = new WorkflowOrchestratorService(
+    projectService,
+    sourceVideoService,
+    transcriptService,
+    clipService,
+    subtitleService,
+    jobService,
+    queueService,
+    storageService,
+    configuredPythonWorkerClient,
+    renderService,
+    publishService
   );
 
   const uploadMiddleware = multer({
@@ -127,14 +146,15 @@ export const createApplicationContainer = async () => {
       youTubeService,
       channelService,
       publishService,
-      storageService
+      storageService,
+      workflowOrchestratorService
     },
     controllers: {
       authController: new AuthController(authService),
       healthController: new HealthController(redisConnection),
       uploadController: new UploadController(uploadService),
       projectController: new ProjectController(projectService),
-      clipController: new ClipController(clipService, renderService),
+      clipController: new ClipController(clipService, renderService, sourceVideoService),
       subtitleController: new SubtitleController(subtitleService),
       channelController: new ChannelController(channelService),
       publishController: new PublishController(publishService),

@@ -1,10 +1,15 @@
 import { NotFoundError } from "../../../common/errors/not-found-error";
 import { ProjectRepository } from "../../repositories/project.repository";
+import {
+  DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
+  type ProjectSubtitlePreferences
+} from "../../models/project.model";
 
 export interface CreateProjectInput {
   userId: string;
   title: string;
   description?: string;
+  subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
 }
 
 export class ProjectService {
@@ -15,6 +20,10 @@ export class ProjectService {
       userId: input.userId as never,
       title: input.title,
       description: input.description,
+      subtitlePreferences: {
+        ...DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
+        ...input.subtitlePreferences
+      },
       status: "processing",
       workflowStage: "ingest"
     });

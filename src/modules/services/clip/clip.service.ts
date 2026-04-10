@@ -59,6 +59,18 @@ export class ClipService {
     });
   }
 
+  public markRendering(clipId: string) {
+    return this.clipRepository.updateById(clipId, {
+      renderStatus: "rendering"
+    });
+  }
+
+  public markRenderFailed(clipId: string) {
+    return this.clipRepository.updateById(clipId, {
+      renderStatus: "failed"
+    });
+  }
+
   public attachSubtitle(clipId: string, subtitleStorageKey: string) {
     return this.clipRepository.updateById(clipId, {
       subtitleStorageKey
@@ -75,6 +87,12 @@ export class ClipService {
     return this.clipRepository.updateById(clipId, {
       publishStatus: "published",
       publishedAt: new Date()
+    });
+  }
+
+  public markPublishFailed(clipId: string) {
+    return this.clipRepository.updateById(clipId, {
+      publishStatus: "failed"
     });
   }
 }
