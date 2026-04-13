@@ -21,6 +21,10 @@ export class QueueService {
     return this.add("ANALYSIS", "video.analysis.requested", payload);
   }
 
+  public addStoryJob(payload: Record<string, unknown>) {
+    return this.add("STORY", "faceless.story.requested", payload);
+  }
+
   public addRenderJob(payload: Record<string, unknown>) {
     return this.add("RENDER", "clip.render.requested", payload);
   }

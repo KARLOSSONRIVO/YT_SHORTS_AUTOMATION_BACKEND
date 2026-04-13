@@ -15,6 +15,7 @@ export const createQueues = (connection: IORedis): QueueRegistry => {
     [QUEUE_NAMES.INGEST]: new Queue(QUEUE_NAMES.INGEST, { connection, defaultJobOptions }),
     [QUEUE_NAMES.TRANSCRIPTION]: new Queue(QUEUE_NAMES.TRANSCRIPTION, { connection, defaultJobOptions }),
     [QUEUE_NAMES.ANALYSIS]: new Queue(QUEUE_NAMES.ANALYSIS, { connection, defaultJobOptions }),
+    [QUEUE_NAMES.STORY]: new Queue(QUEUE_NAMES.STORY, { connection, defaultJobOptions }),
     [QUEUE_NAMES.RENDER]: new Queue(QUEUE_NAMES.RENDER, { connection, defaultJobOptions }),
     [QUEUE_NAMES.UPLOAD]: new Queue(QUEUE_NAMES.UPLOAD, { connection, defaultJobOptions })
   };

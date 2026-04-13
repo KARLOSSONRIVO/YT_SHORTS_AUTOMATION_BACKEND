@@ -19,6 +19,7 @@ import { SubtitleController } from "../modules/controllers/subtitle/subtitle.con
 import { UploadController } from "../modules/controllers/upload/upload.controller";
 import { ChannelRepository } from "../modules/repositories/channel.repository";
 import { ClipRepository } from "../modules/repositories/clip.repository";
+import { FacelessVideoRepository } from "../modules/repositories/faceless-video.repository";
 import { JobRepository } from "../modules/repositories/job.repository";
 import { ProjectRepository } from "../modules/repositories/project.repository";
 import { SourceVideoRepository } from "../modules/repositories/source-video.repository";
@@ -28,6 +29,7 @@ import { UserRepository } from "../modules/repositories/user.repository";
 import { AuthService } from "../modules/services/auth/auth.service";
 import { ChannelService } from "../modules/services/channel/channel.service";
 import { ClipService } from "../modules/services/clip/clip.service";
+import { FacelessVideoService } from "../modules/services/facelessVideo/faceless-video.service";
 import { JobService } from "../modules/services/job/job.service";
 import { ProjectService } from "../modules/services/project/project.service";
 import { PublishService } from "../modules/services/publish/publish.service";
@@ -59,6 +61,7 @@ export const createApplicationContainer = async () => {
   });
 
   const projectRepository = new ProjectRepository();
+  const facelessVideoRepository = new FacelessVideoRepository();
   const clipRepository = new ClipRepository();
   const transcriptRepository = new TranscriptRepository();
   const jobRepository = new JobRepository();
@@ -78,6 +81,13 @@ export const createApplicationContainer = async () => {
   const clipService = new ClipService(clipRepository);
   const queueService = new QueueService(queues);
   const jobService = new JobService(jobRepository);
+  const facelessVideoService = new FacelessVideoService(
+    projectService,
+    jobService,
+    queueService,
+    configuredPythonWorkerClient,
+    facelessVideoRepository
+  );
   const uploadService = new UploadService(
     storageService,
     projectService,
@@ -141,6 +151,7 @@ export const createApplicationContainer = async () => {
       queueService,
       jobService,
       uploadService,
+      facelessVideoService,
       renderService,
       subtitleService,
       youTubeService,
@@ -153,7 +164,7 @@ export const createApplicationContainer = async () => {
       authController: new AuthController(authService),
       healthController: new HealthController(redisConnection),
       uploadController: new UploadController(uploadService),
-      projectController: new ProjectController(projectService),
+      projectController: new ProjectController(projectService, facelessVideoService),
       clipController: new ClipController(clipService, renderService, sourceVideoService),
       subtitleController: new SubtitleController(subtitleService),
       channelController: new ChannelController(channelService),

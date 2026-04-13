@@ -26,8 +26,39 @@ export interface Project {
   userId: Types.ObjectId;
   title: string;
   description?: string;
-  status: "draft" | "processing" | "review" | "published" | "failed";
-  workflowStage: "ingest" | "transcription" | "analysis" | "render" | "review" | "publish" | "completed";
+  projectType: "uploaded_video" | "faceless_story";
+  topic?: string;
+  platforms: Array<"youtube" | "tiktok">;
+  targetDurationSeconds?: number;
+  stylePreset?: string;
+  voice?: string;
+  status:
+    | "draft"
+    | "queued"
+    | "processing"
+    | "writing_script"
+    | "generating_audio"
+    | "generating_subtitles"
+    | "generating_images"
+    | "animating_scenes"
+    | "rendering"
+    | "review"
+    | "published"
+    | "completed"
+    | "failed";
+  workflowStage:
+    | "draft"
+    | "ingest"
+    | "transcription"
+    | "analysis"
+    | "script"
+    | "audio"
+    | "subtitles"
+    | "scenes"
+    | "render"
+    | "review"
+    | "publish"
+    | "completed";
   subtitlePreferences: ProjectSubtitlePreferences;
 }
 
@@ -55,15 +86,57 @@ const projectSchema = new Schema<Project>(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     title: { type: String, required: true, trim: true },
     description: { type: String, trim: true },
+    projectType: {
+      type: String,
+      enum: ["uploaded_video", "faceless_story"],
+      default: "uploaded_video",
+      index: true
+    },
+    topic: { type: String, trim: true },
+    platforms: {
+      type: [String],
+      enum: ["youtube", "tiktok"],
+      default: ["youtube"]
+    },
+    targetDurationSeconds: { type: Number },
+    stylePreset: { type: String, trim: true },
+    voice: { type: String, trim: true },
     status: {
       type: String,
-      enum: ["draft", "processing", "review", "published", "failed"],
+      enum: [
+        "draft",
+        "queued",
+        "processing",
+        "writing_script",
+        "generating_audio",
+        "generating_subtitles",
+        "generating_images",
+        "animating_scenes",
+        "rendering",
+        "review",
+        "published",
+        "completed",
+        "failed"
+      ],
       default: "draft",
       index: true
     },
     workflowStage: {
       type: String,
-      enum: ["ingest", "transcription", "analysis", "render", "review", "publish", "completed"],
+      enum: [
+        "draft",
+        "ingest",
+        "transcription",
+        "analysis",
+        "script",
+        "audio",
+        "subtitles",
+        "scenes",
+        "render",
+        "review",
+        "publish",
+        "completed"
+      ],
       default: "ingest"
     },
     subtitlePreferences: {

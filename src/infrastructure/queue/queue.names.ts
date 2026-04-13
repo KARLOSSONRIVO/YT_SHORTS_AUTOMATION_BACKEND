@@ -2,6 +2,7 @@ export const QUEUE_NAMES = {
   INGEST: "ingest",
   TRANSCRIPTION: "transcription",
   ANALYSIS: "analysis",
+  STORY: "story",
   RENDER: "render",
   UPLOAD: "upload"
 } as const;

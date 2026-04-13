@@ -7,6 +7,7 @@ const bootstrap = async () => {
   const container = await createApplicationContainer();
   const connection = container.redisConnection;
   const workflowOrchestratorService = container.services.workflowOrchestratorService;
+  const facelessVideoService = container.services.facelessVideoService;
 
   const workerOptions: WorkerOptions = {
     connection,
@@ -27,6 +28,11 @@ const bootstrap = async () => {
     new Worker(
       QUEUE_NAMES.ANALYSIS,
       (async (job) => workflowOrchestratorService.processAnalysis(job.data)) as Processor,
+      workerOptions
+    ),
+    new Worker(
+      QUEUE_NAMES.STORY,
+      (async (job) => facelessVideoService.processStage(job.data)) as Processor,
       workerOptions
     ),
     new Worker(

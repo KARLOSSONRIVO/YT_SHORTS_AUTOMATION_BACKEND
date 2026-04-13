@@ -108,6 +108,70 @@ export interface PythonRenderedClipResponse {
   subtitles_path: string;
 }
 
+export interface PythonFacelessScene {
+  scene_index: number;
+  narration: string;
+  image_prompt: string;
+  duration_seconds: number;
+  caption_text: string;
+}
+
+export interface PythonFacelessScriptResponse {
+  job_id: string;
+  project_id: string;
+  title: string;
+  hook: string;
+  narration: string;
+  scenes: PythonFacelessScene[];
+  image_prompts: string[];
+  caption_text: string;
+}
+
+export interface PythonFacelessAudioResponse {
+  job_id: string;
+  project_id: string;
+  audio_path: string;
+  audio_url: string;
+  duration_seconds: number;
+  voice: string;
+}
+
+export interface PythonFacelessSubtitleResponse {
+  job_id: string;
+  project_id: string;
+  srt_path: string;
+  ass_path: string;
+  timestamp_json_path: string;
+  srt_url: string;
+  ass_url: string;
+  timestamp_json_url: string;
+  subtitles: Array<{
+    index: number;
+    start: number;
+    end: number;
+    text: string;
+  }>;
+}
+
+export interface PythonFacelessSceneImageResponse {
+  job_id: string;
+  project_id: string;
+  images: Array<{
+    scene_index: number;
+    prompt: string;
+    image_path: string;
+    image_url: string;
+  }>;
+}
+
+export interface PythonFacelessRenderResponse {
+  job_id: string;
+  project_id: string;
+  video_path: string;
+  video_url: string;
+  duration_seconds: number;
+}
+
 interface UploadRequestInput {
   filePath: string;
   fileName: string;
@@ -245,6 +309,102 @@ export class PythonWorkerClient {
 
     const response = await this.client.post<PythonRenderedClipResponse>("/internal/render-clip-upload", formData, {
       headers: formData instanceof FormData ? undefined : {}
+    });
+
+    return response.data;
+  }
+
+  public async requestFacelessScript(input: {
+    jobId: string;
+    projectId: string;
+    topic: string;
+    tone?: string;
+    language?: string;
+    targetDurationSeconds?: number;
+    stylePreset?: string;
+    audience?: string;
+  }): Promise<PythonFacelessScriptResponse> {
+    const response = await this.client.post<PythonFacelessScriptResponse>("/internal/faceless/generate-script", {
+      job_id: input.jobId,
+      project_id: input.projectId,
+      topic: input.topic,
+      tone: input.tone,
+      language: input.language,
+      target_duration_seconds: input.targetDurationSeconds,
+      style_preset: input.stylePreset,
+      audience: input.audience
+    });
+
+    return response.data;
+  }
+
+  public async requestFacelessAudio(input: {
+    jobId: string;
+    projectId: string;
+    narration: string;
+    voice?: string;
+    speakingRate?: number;
+  }): Promise<PythonFacelessAudioResponse> {
+    const response = await this.client.post<PythonFacelessAudioResponse>("/internal/faceless/generate-audio", {
+      job_id: input.jobId,
+      project_id: input.projectId,
+      narration: input.narration,
+      voice: input.voice,
+      speaking_rate: input.speakingRate ?? 0.82
+    });
+
+    return response.data;
+  }
+
+  public async requestFacelessSubtitles(input: {
+    jobId: string;
+    projectId: string;
+    audioPath?: string;
+    scenes: PythonFacelessScene[];
+  }): Promise<PythonFacelessSubtitleResponse> {
+    const response = await this.client.post<PythonFacelessSubtitleResponse>("/internal/faceless/generate-subtitles", {
+      job_id: input.jobId,
+      project_id: input.projectId,
+      audio_path: input.audioPath,
+      scenes: input.scenes
+    });
+
+    return response.data;
+  }
+
+  public async requestFacelessScenes(input: {
+    jobId: string;
+    projectId: string;
+    scenes: PythonFacelessScene[];
+    visualStyle?: string;
+  }): Promise<PythonFacelessSceneImageResponse> {
+    const response = await this.client.post<PythonFacelessSceneImageResponse>("/internal/faceless/generate-scenes", {
+      job_id: input.jobId,
+      project_id: input.projectId,
+      scenes: input.scenes,
+      visual_style: input.visualStyle
+    });
+
+    return response.data;
+  }
+
+  public async requestFacelessRender(input: {
+    jobId: string;
+    projectId: string;
+    scenes: PythonFacelessScene[];
+    imagePaths: string[];
+    audioPath: string;
+    subtitlesPath?: string;
+    backgroundMusicPath?: string;
+  }): Promise<PythonFacelessRenderResponse> {
+    const response = await this.client.post<PythonFacelessRenderResponse>("/internal/faceless/render", {
+      job_id: input.jobId,
+      project_id: input.projectId,
+      scenes: input.scenes,
+      image_paths: input.imagePaths,
+      audio_path: input.audioPath,
+      subtitles_path: input.subtitlesPath,
+      background_music_path: input.backgroundMusicPath
     });
 
     return response.data;
