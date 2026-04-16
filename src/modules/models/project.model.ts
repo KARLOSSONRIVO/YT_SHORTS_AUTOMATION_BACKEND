@@ -6,19 +6,19 @@ export interface ProjectSubtitlePreferences {
   fillColor: string;
   strokeColor: string;
   highlightColor: string;
-  position: "bottom_center" | "top_center";
+  position: "bottom_center" | "top_center" | "middle_center";
   maxCharsPerLine: number;
   maxLines: number;
 }
 
 export const DEFAULT_PROJECT_SUBTITLE_PREFERENCES: ProjectSubtitlePreferences = {
-  fontFamily: "Montserrat ExtraBold",
-  fontSize: 64,
+  fontFamily: "Bebas Neue",
+  fontSize: 92,
   fillColor: "#FFFFFF",
   strokeColor: "#000000",
-  highlightColor: "#FFD54A",
-  position: "bottom_center",
-  maxCharsPerLine: 28,
+  highlightColor: "#FFFFFF",
+  position: "middle_center",
+  maxCharsPerLine: 18,
   maxLines: 2
 };
 
@@ -71,7 +71,7 @@ const subtitlePreferencesSchema = new Schema<ProjectSubtitlePreferences>(
     highlightColor: { type: String, required: true, default: DEFAULT_PROJECT_SUBTITLE_PREFERENCES.highlightColor },
     position: {
       type: String,
-      enum: ["bottom_center", "top_center"],
+      enum: ["bottom_center", "top_center", "middle_center"],
       required: true,
       default: DEFAULT_PROJECT_SUBTITLE_PREFERENCES.position
     },

@@ -281,7 +281,7 @@ export class PythonWorkerClient {
     fillColor?: string;
     strokeColor?: string;
     highlightColor?: string;
-    position?: "bottom_center" | "top_center";
+    position?: "bottom_center" | "top_center" | "middle_center";
     maxCharsPerLine?: number;
     maxLines?: number;
   }): Promise<PythonRenderedClipResponse> {
@@ -296,13 +296,13 @@ export class PythonWorkerClient {
         transcript_json: input.transcriptJson,
         ...(input.titleHint ? { title_hint: input.titleHint } : {}),
         score: `${input.score ?? 0}`,
-        font_family: input.fontFamily ?? "Montserrat ExtraBold",
-        font_size: `${input.fontSize ?? 64}`,
+        font_family: input.fontFamily ?? "Bebas Neue",
+        font_size: `${input.fontSize ?? 92}`,
         fill_color: input.fillColor ?? "#FFFFFF",
         stroke_color: input.strokeColor ?? "#000000",
-        highlight_color: input.highlightColor ?? "#FFD54A",
-        position: input.position ?? "bottom_center",
-        max_chars_per_line: `${input.maxCharsPerLine ?? 28}`,
+        highlight_color: input.highlightColor ?? "#FFFFFF",
+        position: input.position ?? "middle_center",
+        max_chars_per_line: `${input.maxCharsPerLine ?? 18}`,
         max_lines: `${input.maxLines ?? 2}`
       }
     });
