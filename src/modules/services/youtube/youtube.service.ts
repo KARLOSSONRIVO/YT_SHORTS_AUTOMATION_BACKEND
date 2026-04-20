@@ -16,6 +16,10 @@ export class YouTubeService {
     return this.youTubeClient.fetchChannelProfile(tokens);
   }
 
+  public revokeToken(token: string) {
+    return this.youTubeClient.revokeToken(token);
+  }
+
   public uploadShort(input: {
     tokens: YouTubeTokenSet;
     title: string;

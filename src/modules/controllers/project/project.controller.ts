@@ -1,12 +1,14 @@
 import type { Request, Response } from "express";
 import { sendSuccess } from "../../../common/utils/api-response";
 import { FacelessVideoService, type FacelessStage } from "../../services/facelessVideo/faceless-video.service";
+import { PublishService } from "../../services/publish/publish.service";
 import { ProjectService } from "../../services/project/project.service";
 
 export class ProjectController {
   constructor(
     private readonly projectService: ProjectService,
-    private readonly facelessVideoService: FacelessVideoService
+    private readonly facelessVideoService: FacelessVideoService,
+    private readonly publishService: PublishService
   ) {}
 
   public createProject = async (request: Request, response: Response): Promise<void> => {
@@ -20,9 +22,33 @@ export class ProjectController {
     sendSuccess(response, projects);
   };
 
+  public listVoices = async (_request: Request, response: Response): Promise<void> => {
+    const voices = await this.facelessVideoService.listVoices();
+    sendSuccess(response, voices);
+  };
+
+  public previewVoice = async (request: Request, response: Response): Promise<void> => {
+    const preview = await this.facelessVideoService.getVoicePreview(String(request.params.voice));
+    response.setHeader("Content-Type", preview.mimeType);
+    response.setHeader("Content-Disposition", `inline; filename=\"${preview.fileName}\"`);
+    response.setHeader("Cache-Control", "no-store");
+    response.send(preview.buffer);
+  };
+
   public getProject = async (request: Request, response: Response): Promise<void> => {
     const project = await this.projectService.getProjectOrThrow(String(request.params.projectId));
-    sendSuccess(response, project);
+    const serializedProject = typeof project.toObject === "function" ? project.toObject() : project;
+
+    if (project.projectType !== "faceless_story") {
+      sendSuccess(response, serializedProject);
+      return;
+    }
+
+    const publishInfo = await this.facelessVideoService.getLatestPublishInfo(String(request.params.projectId));
+    sendSuccess(response, {
+      ...serializedProject,
+      publishInfo
+    });
   };
 
   public getProjectStatus = async (request: Request, response: Response): Promise<void> => {
@@ -58,6 +84,17 @@ export class ProjectController {
   public listAssets = async (request: Request, response: Response): Promise<void> => {
     const assets = await this.facelessVideoService.listAssets(String(request.params.projectId));
     sendSuccess(response, assets);
+  };
+
+  public publishProject = async (request: Request, response: Response): Promise<void> => {
+    const result = await this.publishService.publishFacelessProjectNow({
+      projectId: String(request.params.projectId),
+      channelId: request.body.channelId,
+      title: request.body.title,
+      description: request.body.description ?? "",
+      privacyStatus: request.body.privacyStatus
+    });
+    sendSuccess(response, result, 201);
   };
 
   private async enqueueFacelessStage(request: Request, response: Response, stage: FacelessStage): Promise<void> {

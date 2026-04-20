@@ -49,4 +49,32 @@ export class ChannelService {
 
     return channel;
   }
+
+  public async disconnectChannel(userId: string, channelId: string) {
+    const channel = await this.channelRepository.findByIdAndUserId(channelId, userId);
+    if (!channel) {
+      throw new NotFoundError("Channel not found.", { channelId });
+    }
+
+    const tokensToRevoke = [channel.refreshToken, channel.accessToken].filter(
+      (token): token is string => typeof token === "string" && token.length > 0
+    );
+
+    for (const token of tokensToRevoke) {
+      try {
+        await this.youTubeService.revokeToken(token);
+      } catch {
+        // Keep the local disconnect path resilient even if Google revocation fails.
+      }
+    }
+
+    return this.channelRepository.updateById(channelId, {
+      accessToken: undefined,
+      refreshToken: undefined,
+      tokenType: undefined,
+      scope: undefined,
+      tokenExpiryDate: undefined,
+      status: "disconnected"
+    });
+  }
 }

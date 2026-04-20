@@ -1,7 +1,8 @@
 import { HydratedDocument, Schema, Types, model } from "mongoose";
 
 export interface UploadHistory {
-  clipId: Types.ObjectId;
+  clipId?: Types.ObjectId;
+  projectId?: Types.ObjectId;
   channelId: Types.ObjectId;
   youtubeVideoId?: string;
   title: string;
@@ -15,7 +16,8 @@ export interface UploadHistory {
 
 const uploadHistorySchema = new Schema<UploadHistory>(
   {
-    clipId: { type: Schema.Types.ObjectId, ref: "Clip", required: true, index: true },
+    clipId: { type: Schema.Types.ObjectId, ref: "Clip", index: true },
+    projectId: { type: Schema.Types.ObjectId, ref: "Project", index: true },
     channelId: { type: Schema.Types.ObjectId, ref: "Channel", required: true, index: true },
     youtubeVideoId: { type: String },
     title: { type: String, required: true },

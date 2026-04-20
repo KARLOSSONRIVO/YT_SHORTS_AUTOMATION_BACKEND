@@ -86,7 +86,8 @@ export const createApplicationContainer = async () => {
     jobService,
     queueService,
     configuredPythonWorkerClient,
-    facelessVideoRepository
+    facelessVideoRepository,
+    uploadHistoryRepository
   );
   const uploadService = new UploadService(
     storageService,
@@ -115,7 +116,10 @@ export const createApplicationContainer = async () => {
     storageService,
     uploadHistoryRepository,
     jobService,
-    queueService
+    queueService,
+    projectService,
+    facelessVideoRepository,
+    configuredPythonWorkerClient
   );
   const workflowOrchestratorService = new WorkflowOrchestratorService(
     projectService,
@@ -164,7 +168,7 @@ export const createApplicationContainer = async () => {
       authController: new AuthController(authService),
       healthController: new HealthController(redisConnection),
       uploadController: new UploadController(uploadService),
-      projectController: new ProjectController(projectService, facelessVideoService),
+      projectController: new ProjectController(projectService, facelessVideoService, publishService),
       clipController: new ClipController(clipService, renderService, sourceVideoService),
       subtitleController: new SubtitleController(subtitleService),
       channelController: new ChannelController(channelService),

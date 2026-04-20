@@ -2,10 +2,12 @@ import { AppError } from "../../../common/errors/app-error";
 import { QUEUE_NAMES } from "../../../infrastructure/queue/queue.names";
 import {
   type PythonFacelessScene,
+  type PythonFacelessVoice,
   type PythonWorkerClient
 } from "../../../infrastructure/pythonWorker/python-worker.client";
 import { type StoryAssetDocument, type StoryAssetType } from "../../models/story-asset.model";
 import { FacelessVideoRepository } from "../../repositories/faceless-video.repository";
+import { UploadHistoryRepository } from "../../repositories/upload-history.repository";
 import { JobService } from "../job/job.service";
 import { ProjectService } from "../project/project.service";
 import { QueueService } from "../queue/queue.service";
@@ -53,7 +55,8 @@ export class FacelessVideoService {
     private readonly jobService: JobService,
     private readonly queueService: QueueService,
     private readonly pythonWorkerClient: PythonWorkerClient,
-    private readonly facelessVideoRepository: FacelessVideoRepository
+    private readonly facelessVideoRepository: FacelessVideoRepository,
+    private readonly uploadHistoryRepository?: UploadHistoryRepository
   ) {}
 
   public createProject(input: CreateFacelessProjectInput) {
@@ -122,6 +125,42 @@ export class FacelessVideoService {
     return this.facelessVideoRepository.findAssets(projectId);
   }
 
+  public listVoices(): Promise<PythonFacelessVoice[]> {
+    return this.pythonWorkerClient.requestFacelessVoices();
+  }
+
+  public async getVoicePreview(voice: string) {
+    const preview = await this.pythonWorkerClient.requestFacelessVoicePreview({ voice });
+    const audio = await this.pythonWorkerClient.downloadBinary(preview.audio_url);
+
+    return {
+      voice: preview.voice,
+      buffer: audio,
+      mimeType: "audio/wav",
+      fileName: `${preview.voice}.wav`,
+      sampleText: preview.sample_text
+    };
+  }
+
+  public async getLatestPublishInfo(projectId: string) {
+    if (!this.uploadHistoryRepository) {
+      return null;
+    }
+
+    const latestUpload = await this.uploadHistoryRepository.findLatestByProjectId(projectId);
+    if (!latestUpload || latestUpload.status !== "uploaded" || !latestUpload.youtubeVideoId) {
+      return null;
+    }
+
+    return {
+      youtubeVideoId: latestUpload.youtubeVideoId,
+      videoUrl: `https://www.youtube.com/watch?v=${latestUpload.youtubeVideoId}`,
+      uploadedAt: latestUpload.uploadedAt?.toISOString(),
+      title: latestUpload.title,
+      privacyStatus: latestUpload.privacyStatus
+    };
+  }
+
   public async processStage(payload: StoryStagePayload) {
     try {
       await this.markJobActive(payload.jobId);
@@ -180,6 +219,7 @@ export class FacelessVideoService {
     const response = await this.pythonWorkerClient.requestFacelessScript({
       jobId: payload.jobId,
       projectId: payload.projectId,
+      projectTitle: project.title,
       topic: project.topic,
       targetDurationSeconds: project.targetDurationSeconds,
       stylePreset: project.stylePreset
@@ -218,6 +258,7 @@ export class FacelessVideoService {
     const response = await this.pythonWorkerClient.requestFacelessAudio({
       jobId: payload.jobId,
       projectId: payload.projectId,
+      projectTitle: project.title,
       narration: script.narration,
       voice: project.voice
     });
@@ -240,7 +281,8 @@ export class FacelessVideoService {
   }
 
   private async processSubtitles(payload: StoryStagePayload) {
-    const [script, audioAsset] = await Promise.all([
+    const [project, script, audioAsset] = await Promise.all([
+      this.projectService.getProjectOrThrow(payload.projectId),
       this.getScriptOrThrow(payload.projectId),
       this.facelessVideoRepository.findLatestAssetByType(payload.projectId, "narration_audio")
     ]);
@@ -248,6 +290,7 @@ export class FacelessVideoService {
     const response = await this.pythonWorkerClient.requestFacelessSubtitles({
       jobId: payload.jobId,
       projectId: payload.projectId,
+      projectTitle: project.title,
       audioPath: audioAsset?.absolutePath,
       scenes: this.toPythonScenes(script.scenes)
     });
@@ -291,6 +334,7 @@ export class FacelessVideoService {
     const response = await this.pythonWorkerClient.requestFacelessScenes({
       jobId: payload.jobId,
       projectId: payload.projectId,
+      projectTitle: project.title,
       scenes: this.toPythonScenes(script.scenes),
       visualStyle: project.stylePreset
     });
@@ -313,7 +357,8 @@ export class FacelessVideoService {
   }
 
   private async processRender(payload: StoryStagePayload) {
-    const [script, sceneImages, audioAsset, subtitleAsset] = await Promise.all([
+    const [project, script, sceneImages, audioAsset, subtitleAsset] = await Promise.all([
+      this.projectService.getProjectOrThrow(payload.projectId),
       this.getScriptOrThrow(payload.projectId),
       this.facelessVideoRepository.findAssets(payload.projectId, { assetType: "scene_image" }),
       this.getAssetOrThrow(payload.projectId, "narration_audio"),
@@ -336,6 +381,7 @@ export class FacelessVideoService {
     const response = await this.pythonWorkerClient.requestFacelessRender({
       jobId: payload.jobId,
       projectId: payload.projectId,
+      projectTitle: project.title,
       scenes: this.toPythonScenes(script.scenes),
       imagePaths,
       audioPath: audioAsset.absolutePath,

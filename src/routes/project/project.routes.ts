@@ -5,7 +5,9 @@ import { ProjectController } from "../../modules/controllers/project/project.con
 import {
   createFacelessProjectBodySchema,
   listProjectsQuerySchema,
-  projectIdParamsSchema
+  publishFacelessProjectBodySchema,
+  projectIdParamsSchema,
+  voiceParamsSchema
 } from "../../modules/validators/project.validator";
 
 export const createProjectRoutes = (projectController: ProjectController): Router => {
@@ -13,6 +15,12 @@ export const createProjectRoutes = (projectController: ProjectController): Route
 
   router.post("/", validate({ body: createFacelessProjectBodySchema }), asyncHandler(projectController.createProject));
   router.get("/", validate({ query: listProjectsQuerySchema }), asyncHandler(projectController.listProjects));
+  router.get("/faceless/voices", asyncHandler(projectController.listVoices));
+  router.get(
+    "/faceless/voices/:voice/preview",
+    validate({ params: voiceParamsSchema }),
+    asyncHandler(projectController.previewVoice)
+  );
   router.get(
     "/:projectId/status",
     validate({ params: projectIdParamsSchema }),
@@ -44,6 +52,11 @@ export const createProjectRoutes = (projectController: ProjectController): Route
     asyncHandler(projectController.generateScenes)
   );
   router.post("/:projectId/render", validate({ params: projectIdParamsSchema }), asyncHandler(projectController.render));
+  router.post(
+    "/:projectId/publish",
+    validate({ params: projectIdParamsSchema, body: publishFacelessProjectBodySchema }),
+    asyncHandler(projectController.publishProject)
+  );
   router.get(
     "/:projectId/assets",
     validate({ params: projectIdParamsSchema }),

@@ -17,7 +17,15 @@ export class ChannelRepository {
     return ChannelModel.findById(channelId).exec();
   }
 
+  public findByIdAndUserId(channelId: string, userId: string): Promise<ChannelDocument | null> {
+    return ChannelModel.findOne({ _id: channelId, userId }).exec();
+  }
+
   public findByUserId(userId: string): Promise<ChannelDocument[]> {
     return ChannelModel.find({ userId }).sort({ createdAt: -1 }).exec();
+  }
+
+  public updateById(channelId: string, payload: Partial<Channel>): Promise<ChannelDocument | null> {
+    return ChannelModel.findByIdAndUpdate(channelId, payload, { new: true }).exec();
   }
 }

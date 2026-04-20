@@ -136,6 +136,22 @@ export interface PythonFacelessAudioResponse {
   voice: string;
 }
 
+export interface PythonFacelessVoice {
+  voice: string;
+  label: string;
+  language: string;
+  gender: string;
+  quality_grade?: string | null;
+  sample_text: string;
+}
+
+export interface PythonFacelessVoicePreviewResponse {
+  voice: string;
+  audio_path: string;
+  audio_url: string;
+  sample_text: string;
+}
+
 export interface PythonFacelessSubtitleResponse {
   job_id: string;
   project_id: string;
@@ -317,6 +333,7 @@ export class PythonWorkerClient {
   public async requestFacelessScript(input: {
     jobId: string;
     projectId: string;
+    projectTitle?: string;
     topic: string;
     tone?: string;
     language?: string;
@@ -327,6 +344,7 @@ export class PythonWorkerClient {
     const response = await this.client.post<PythonFacelessScriptResponse>("/internal/faceless/generate-script", {
       job_id: input.jobId,
       project_id: input.projectId,
+      project_title: input.projectTitle,
       topic: input.topic,
       tone: input.tone,
       language: input.language,
@@ -341,6 +359,7 @@ export class PythonWorkerClient {
   public async requestFacelessAudio(input: {
     jobId: string;
     projectId: string;
+    projectTitle?: string;
     narration: string;
     voice?: string;
     speakingRate?: number;
@@ -348,6 +367,7 @@ export class PythonWorkerClient {
     const response = await this.client.post<PythonFacelessAudioResponse>("/internal/faceless/generate-audio", {
       job_id: input.jobId,
       project_id: input.projectId,
+      project_title: input.projectTitle,
       narration: input.narration,
       voice: input.voice,
       speaking_rate: input.speakingRate ?? 0.82
@@ -356,15 +376,34 @@ export class PythonWorkerClient {
     return response.data;
   }
 
+  public async requestFacelessVoices(): Promise<PythonFacelessVoice[]> {
+    const response = await this.client.get<PythonFacelessVoice[]>("/internal/faceless/voices");
+    return response.data;
+  }
+
+  public async requestFacelessVoicePreview(input: {
+    voice: string;
+    text?: string;
+  }): Promise<PythonFacelessVoicePreviewResponse> {
+    const response = await this.client.post<PythonFacelessVoicePreviewResponse>("/internal/faceless/preview-voice", {
+      voice: input.voice,
+      text: input.text
+    });
+
+    return response.data;
+  }
+
   public async requestFacelessSubtitles(input: {
     jobId: string;
     projectId: string;
+    projectTitle?: string;
     audioPath?: string;
     scenes: PythonFacelessScene[];
   }): Promise<PythonFacelessSubtitleResponse> {
     const response = await this.client.post<PythonFacelessSubtitleResponse>("/internal/faceless/generate-subtitles", {
       job_id: input.jobId,
       project_id: input.projectId,
+      project_title: input.projectTitle,
       audio_path: input.audioPath,
       scenes: input.scenes
     });
@@ -375,12 +414,14 @@ export class PythonWorkerClient {
   public async requestFacelessScenes(input: {
     jobId: string;
     projectId: string;
+    projectTitle?: string;
     scenes: PythonFacelessScene[];
     visualStyle?: string;
   }): Promise<PythonFacelessSceneImageResponse> {
     const response = await this.client.post<PythonFacelessSceneImageResponse>("/internal/faceless/generate-scenes", {
       job_id: input.jobId,
       project_id: input.projectId,
+      project_title: input.projectTitle,
       scenes: input.scenes,
       visual_style: input.visualStyle
     });
@@ -391,6 +432,7 @@ export class PythonWorkerClient {
   public async requestFacelessRender(input: {
     jobId: string;
     projectId: string;
+    projectTitle?: string;
     scenes: PythonFacelessScene[];
     imagePaths: string[];
     audioPath: string;
@@ -400,6 +442,7 @@ export class PythonWorkerClient {
     const response = await this.client.post<PythonFacelessRenderResponse>("/internal/faceless/render", {
       job_id: input.jobId,
       project_id: input.projectId,
+      project_title: input.projectTitle,
       scenes: input.scenes,
       image_paths: input.imagePaths,
       audio_path: input.audioPath,
