@@ -284,6 +284,8 @@ export class PythonWorkerClient {
 
   public async requestRenderedClipUpload(input: {
     jobId: string;
+    projectId: string;
+    projectTitle?: string;
     filePath: string;
     fileName: string;
     mimeType: string;
@@ -307,6 +309,8 @@ export class PythonWorkerClient {
       mimeType: input.mimeType,
       fields: {
         job_id: input.jobId,
+        project_id: input.projectId,
+        ...(input.projectTitle ? { project_title: input.projectTitle } : {}),
         clip_start: `${input.clipStart}`,
         clip_end: `${input.clipEnd}`,
         transcript_json: input.transcriptJson,

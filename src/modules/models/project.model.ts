@@ -16,7 +16,7 @@ export const DEFAULT_PROJECT_SUBTITLE_PREFERENCES: ProjectSubtitlePreferences = 
   fontSize: 92,
   fillColor: "#FFFFFF",
   strokeColor: "#000000",
-  highlightColor: "#FFFFFF",
+  highlightColor: "#FFD54A",
   position: "middle_center",
   maxCharsPerLine: 18,
   maxLines: 2
@@ -26,6 +26,8 @@ export interface Project {
   userId: Types.ObjectId;
   title: string;
   description?: string;
+  hashtags?: string;
+  targetClipCount?: number;
   projectType: "uploaded_video" | "faceless_story";
   topic?: string;
   platforms: Array<"youtube" | "tiktok">;
@@ -86,6 +88,8 @@ const projectSchema = new Schema<Project>(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     title: { type: String, required: true, trim: true },
     description: { type: String, trim: true },
+    hashtags: { type: String, trim: true },
+    targetClipCount: { type: Number, min: 1, max: 20, default: 5 },
     projectType: {
       type: String,
       enum: ["uploaded_video", "faceless_story"],

@@ -9,6 +9,8 @@ export interface CreateUploadWorkflowInput {
   userId: string;
   title: string;
   description?: string;
+  hashtags?: string;
+  targetClipCount?: number;
   file: Express.Multer.File;
   fontFamily?: string;
   fontSize?: number;
@@ -35,6 +37,8 @@ export class UploadService {
       userId: input.userId,
       title: input.title,
       description: input.description,
+      hashtags: input.hashtags,
+      targetClipCount: input.targetClipCount,
       subtitlePreferences: {
         fontFamily: input.fontFamily,
         fontSize: input.fontSize,

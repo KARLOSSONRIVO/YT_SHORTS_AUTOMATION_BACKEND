@@ -6,6 +6,8 @@ export const createUploadBodySchema = z.object({
   userId: z.string().min(1),
   title: z.string().min(3).max(160),
   description: z.string().max(5000).optional(),
+  hashtags: z.string().max(300).optional(),
+  targetClipCount: z.coerce.number().int().min(1).max(20).optional(),
   fontFamily: z.string().min(1).max(120).optional(),
   fontSize: z.coerce.number().int().min(24).max(120).optional(),
   fillColor: hexColor.optional(),

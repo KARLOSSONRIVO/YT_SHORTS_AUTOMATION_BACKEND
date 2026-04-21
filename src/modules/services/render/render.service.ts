@@ -88,6 +88,8 @@ export class RenderService {
     const subtitlePreferences = this.buildSubtitlePreferences(project.subtitlePreferences);
     const pythonRenderResult = await this.pythonWorkerClient.requestRenderedClipUpload({
       jobId: clipId,
+      projectId,
+      projectTitle: project.title,
       filePath: sourcePath,
       fileName: sourceVideo.originalFileName,
       mimeType: sourceVideo.mimeType,
@@ -111,9 +113,25 @@ export class RenderService {
 
     await this.clipService.markRendered(clipId, storedRender.storageKey);
 
+    const projectClips = await this.clipService.listByProjectId(projectId);
+    const allRenderableClipsReady = projectClips.every(
+      (projectClip) =>
+        projectClip.reviewStatus === "rejected" ||
+        projectClip.renderStatus === "rendered" ||
+        projectClip.renderStatus === "failed"
+    );
+
+    if (allRenderableClipsReady) {
+      await this.projectService.updateWorkflow(projectId, "review", "review");
+    }
+
     return {
       clipId,
       outputStorageKey: storedRender.storageKey
     };
+  }
+
+  public async deleteRenderedClipOutput(outputStorageKey: string) {
+    await this.storageService.delete(outputStorageKey);
   }
 }

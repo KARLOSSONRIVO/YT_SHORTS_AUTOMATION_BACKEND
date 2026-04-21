@@ -71,6 +71,14 @@ export class ClipService {
     });
   }
 
+  public clearRenderedOutput(clipId: string) {
+    return this.clipRepository.updateById(clipId, {
+      outputStorageKey: undefined,
+      renderStatus: "queued",
+      publishStatus: "not_ready"
+    });
+  }
+
   public attachSubtitle(clipId: string, subtitleStorageKey: string) {
     return this.clipRepository.updateById(clipId, {
       subtitleStorageKey

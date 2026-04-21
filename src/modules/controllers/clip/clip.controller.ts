@@ -53,10 +53,16 @@ export class ClipController {
   };
 
   public reviewClip = async (request: Request, response: Response): Promise<void> => {
-    const clip = await this.clipService.reviewClip(String(request.params.clipId), request.body.reviewStatus);
+    const clipId = String(request.params.clipId);
+    let clip = await this.clipService.reviewClip(clipId, request.body.reviewStatus);
 
-    if (request.body.reviewStatus === "approved" && clip) {
+    if (request.body.reviewStatus === "approved" && clip && !clip.outputStorageKey) {
       await this.renderService.queueRender(clip.id, `${clip.projectId}`);
+    }
+
+    if (request.body.reviewStatus === "rejected" && clip?.outputStorageKey) {
+      await this.renderService.deleteRenderedClipOutput(clip.outputStorageKey);
+      clip = await this.clipService.clearRenderedOutput(clipId);
     }
 
     const sourceVideo = clip ? await this.sourceVideoService.getByProjectIdOrThrow(`${clip.projectId}`) : undefined;

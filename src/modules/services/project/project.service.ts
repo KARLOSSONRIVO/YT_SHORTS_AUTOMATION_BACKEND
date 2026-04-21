@@ -9,6 +9,8 @@ export interface CreateProjectInput {
   userId: string;
   title: string;
   description?: string;
+  hashtags?: string;
+  targetClipCount?: number;
   subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
 }
 
@@ -32,6 +34,8 @@ export class ProjectService {
       userId: input.userId as never,
       title: input.title,
       description: input.description,
+      hashtags: input.hashtags,
+      targetClipCount: input.targetClipCount ?? 5,
       projectType: "uploaded_video",
       platforms: ["youtube"],
       subtitlePreferences: {

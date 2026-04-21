@@ -313,13 +313,15 @@ export class WorkflowOrchestratorService {
 
       const sourceVideo = await this.sourceVideoService.getByProjectIdOrThrow(payload.projectId);
       const transcript = await this.transcriptService.getByProjectIdOrThrow(payload.projectId);
+      const project = await this.projectService.getProjectOrThrow(payload.projectId);
       const filePath = this.storageService.resolveStoragePath(sourceVideo.storageKey);
       const response = await this.pythonWorkerClient.requestClipAnalysisUpload({
         jobId: payload.jobId,
         filePath,
         fileName: sourceVideo.originalFileName,
         mimeType: sourceVideo.mimeType,
-        language: payload.languageHint
+        language: payload.languageHint,
+        topK: project.targetClipCount
       });
 
       const createdClips = await this.persistAnalysisArtifacts(
@@ -334,7 +336,12 @@ export class WorkflowOrchestratorService {
         status: "processed",
         ...dimensions
       });
-      await this.projectService.updateWorkflow(payload.projectId, "review", "review");
+      if (createdClips.length > 0) {
+        await Promise.all(createdClips.map((clip) => this.renderService.queueRender(clip.id, payload.projectId)));
+        await this.projectService.updateWorkflow(payload.projectId, "render", "processing");
+      } else {
+        await this.projectService.updateWorkflow(payload.projectId, "review", "review");
+      }
       await this.markJobCompleted(payload.jobId, {
         clipCount: createdClips.length,
         warnings: response.warnings
@@ -355,6 +362,17 @@ export class WorkflowOrchestratorService {
       await this.markJobCompleted(payload.jobId, result);
     } catch (error) {
       await this.clipService.markRenderFailed(payload.clipId);
+      const projectClips = await this.clipService.listByProjectId(payload.projectId);
+      const allRenderableClipsReady = projectClips.every(
+        (projectClip) =>
+          projectClip.reviewStatus === "rejected" ||
+          projectClip.renderStatus === "rendered" ||
+          projectClip.renderStatus === "failed"
+      );
+
+      if (allRenderableClipsReady) {
+        await this.projectService.updateWorkflow(payload.projectId, "review", "review");
+      }
       await this.markJobFailed(payload.jobId, error);
       throw error;
     }
