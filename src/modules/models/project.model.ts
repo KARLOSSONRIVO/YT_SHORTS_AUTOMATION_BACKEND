@@ -11,6 +11,17 @@ export interface ProjectSubtitlePreferences {
   maxLines: number;
 }
 
+export interface RedditSourceMetadata {
+  postId: string;
+  permalink: string;
+  title: string;
+  body: string;
+  subreddit: string;
+  author?: string;
+  score?: number;
+  fetchedAt: Date;
+}
+
 export const DEFAULT_PROJECT_SUBTITLE_PREFERENCES: ProjectSubtitlePreferences = {
   fontFamily: "Bebas Neue",
   fontSize: 92,
@@ -29,11 +40,13 @@ export interface Project {
   hashtags?: string;
   targetClipCount?: number;
   projectType: "uploaded_video" | "faceless_story";
+  facelessSource?: "topic" | "reddit_trending";
   topic?: string;
   platforms: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
   voice?: string;
+  redditSource?: RedditSourceMetadata;
   status:
     | "draft"
     | "queued"
@@ -83,6 +96,20 @@ const subtitlePreferencesSchema = new Schema<ProjectSubtitlePreferences>(
   { _id: false }
 );
 
+const redditSourceMetadataSchema = new Schema<RedditSourceMetadata>(
+  {
+    postId: { type: String, required: true, trim: true },
+    permalink: { type: String, required: true, trim: true },
+    title: { type: String, required: true, trim: true },
+    body: { type: String, required: true },
+    subreddit: { type: String, required: true, trim: true },
+    author: { type: String, trim: true },
+    score: { type: Number },
+    fetchedAt: { type: Date, required: true }
+  },
+  { _id: false }
+);
+
 const projectSchema = new Schema<Project>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
@@ -96,6 +123,10 @@ const projectSchema = new Schema<Project>(
       default: "uploaded_video",
       index: true
     },
+    facelessSource: {
+      type: String,
+      enum: ["topic", "reddit_trending"]
+    },
     topic: { type: String, trim: true },
     platforms: {
       type: [String],
@@ -105,6 +136,7 @@ const projectSchema = new Schema<Project>(
     targetDurationSeconds: { type: Number },
     stylePreset: { type: String, trim: true },
     voice: { type: String, trim: true },
+    redditSource: { type: redditSourceMetadataSchema },
     status: {
       type: String,
       enum: [

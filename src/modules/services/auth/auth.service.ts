@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { AppError } from "../../../common/errors/app-error";
 import { UserRepository } from "../../repositories/user.repository";
+import { AuthTokenService } from "./auth-token.service";
 
 export interface MockLoginInput {
   email: string;
@@ -44,7 +45,10 @@ const verifyPassword = (password: string, passwordHash: string): boolean => {
 };
 
 export class AuthService {
-  constructor(private readonly userRepository: UserRepository) {}
+  constructor(
+    private readonly userRepository: UserRepository,
+    private readonly authTokenService: AuthTokenService
+  ) {}
 
   private toAuthUser(user: {
     id?: string;
@@ -67,11 +71,39 @@ export class AuthService {
     };
   }
 
+  private toAuthSession(user: {
+    id?: string;
+    _id?: { toString(): string };
+    email: string;
+    displayName: string;
+    roles?: string[];
+    status: "active" | "disabled";
+    createdAt?: Date;
+    updatedAt?: Date;
+  }) {
+    const authUser = this.toAuthUser(user);
+
+    if (!authUser.id) {
+      throw new AppError("Could not issue an auth token for this account.", 500, "AUTH_TOKEN_ISSUE_FAILED");
+    }
+
+    return {
+      ...authUser,
+      accessToken: this.authTokenService.issueToken({
+        sub: authUser.id,
+        email: authUser.email,
+        displayName: authUser.displayName,
+        roles: authUser.roles,
+        status: authUser.status
+      })
+    };
+  }
+
   public loginOrRegister(input: MockLoginInput) {
     return this.userRepository.upsertByEmail({
       email: input.email,
       displayName: input.displayName
-    }).then((user) => this.toAuthUser(user));
+    }).then((user) => this.toAuthSession(user));
   }
 
   public async register(input: RegisterInput) {
@@ -89,7 +121,7 @@ export class AuthService {
       status: "active"
     });
 
-    return this.toAuthUser(user);
+    return this.toAuthSession(user);
   }
 
   public async login(input: LoginInput) {
@@ -103,6 +135,6 @@ export class AuthService {
       throw new AppError("This account is not active.", 403, "ACCOUNT_DISABLED");
     }
 
-    return this.toAuthUser(user);
+    return this.toAuthSession(user);
   }
 }

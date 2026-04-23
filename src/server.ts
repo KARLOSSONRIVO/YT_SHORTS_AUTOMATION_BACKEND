@@ -6,7 +6,7 @@ import { createApplicationContainer } from "./config/container";
 
 const bootstrap = async () => {
   const container = await createApplicationContainer();
-  const app = createApp(container.controllers, container.uploadMiddleware);
+  const app = createApp(container.controllers, container.uploadMiddleware, container.authMiddleware);
   const server = createServer(app);
 
   server.listen(env.PORT, () => {

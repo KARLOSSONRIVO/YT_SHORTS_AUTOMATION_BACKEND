@@ -4,7 +4,7 @@ import { validate } from "../../common/middlewares/validate.middleware";
 import { ProjectController } from "../../modules/controllers/project/project.controller";
 import {
   createFacelessProjectBodySchema,
-  listProjectsQuerySchema,
+  createTrendingRedditProjectBodySchema,
   publishFacelessProjectBodySchema,
   projectIdParamsSchema,
   voiceParamsSchema
@@ -14,7 +14,12 @@ export const createProjectRoutes = (projectController: ProjectController): Route
   const router = Router();
 
   router.post("/", validate({ body: createFacelessProjectBodySchema }), asyncHandler(projectController.createProject));
-  router.get("/", validate({ query: listProjectsQuerySchema }), asyncHandler(projectController.listProjects));
+  router.post(
+    "/reddit/trending",
+    validate({ body: createTrendingRedditProjectBodySchema }),
+    asyncHandler(projectController.createTrendingRedditProject)
+  );
+  router.get("/", asyncHandler(projectController.listProjects));
   router.get("/faceless/voices", asyncHandler(projectController.listVoices));
   router.get(
     "/faceless/voices/:voice/preview",

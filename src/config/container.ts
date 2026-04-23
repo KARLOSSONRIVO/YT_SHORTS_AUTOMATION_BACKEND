@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import multer from "multer";
+import { createRequireAuth } from "../common/middlewares/require-auth.middleware";
 import { env } from "./env";
 import { connectToDatabase, disconnectFromDatabase } from "../infrastructure/db/mongoose";
 import { FfmpegClient } from "../infrastructure/ffmpeg/ffmpeg.client";
@@ -27,6 +28,7 @@ import { TranscriptRepository } from "../modules/repositories/transcript.reposit
 import { UploadHistoryRepository } from "../modules/repositories/upload-history.repository";
 import { UserRepository } from "../modules/repositories/user.repository";
 import { AuthService } from "../modules/services/auth/auth.service";
+import { AuthTokenService } from "../modules/services/auth/auth-token.service";
 import { ChannelService } from "../modules/services/channel/channel.service";
 import { ClipService } from "../modules/services/clip/clip.service";
 import { FacelessVideoService } from "../modules/services/facelessVideo/faceless-video.service";
@@ -34,6 +36,7 @@ import { JobService } from "../modules/services/job/job.service";
 import { ProjectService } from "../modules/services/project/project.service";
 import { PublishService } from "../modules/services/publish/publish.service";
 import { QueueService } from "../modules/services/queue/queue.service";
+import { RedditTrendingService } from "../modules/services/redditStory/reddit-trending.service";
 import { RenderService } from "../modules/services/render/render.service";
 import { SourceVideoService } from "../modules/services/sourceVideo/source-video.service";
 import { StorageService } from "../modules/services/storage/storage.service";
@@ -74,8 +77,10 @@ export const createApplicationContainer = async () => {
   await storageService.ensureReady();
   await fs.mkdir(env.TEMP_UPLOAD_DIR, { recursive: true });
 
-  const authService = new AuthService(userRepository);
+  const authTokenService = new AuthTokenService(env.AUTH_TOKEN_SECRET, env.AUTH_TOKEN_TTL_DAYS * 24 * 60 * 60);
+  const authService = new AuthService(userRepository, authTokenService);
   const projectService = new ProjectService(projectRepository);
+  const redditTrendingService = new RedditTrendingService(projectRepository);
   const sourceVideoService = new SourceVideoService(sourceVideoRepository);
   const transcriptService = new TranscriptService(transcriptRepository, configuredPythonWorkerClient);
   const clipService = new ClipService(clipRepository);
@@ -87,6 +92,7 @@ export const createApplicationContainer = async () => {
     queueService,
     configuredPythonWorkerClient,
     facelessVideoRepository,
+    redditTrendingService,
     uploadHistoryRepository
   );
   const uploadService = new UploadService(
@@ -190,11 +196,13 @@ export const createApplicationContainer = async () => {
       fileSize: env.MAX_FILE_SIZE_BYTES
     }
   });
+  const authMiddleware = createRequireAuth(authTokenService, userRepository);
 
   return {
     redisConnection,
     queues,
     uploadMiddleware,
+    authMiddleware,
     services: {
       authService,
       projectService,

@@ -5,12 +5,14 @@ import {
   type PythonFacelessVoice,
   type PythonWorkerClient
 } from "../../../infrastructure/pythonWorker/python-worker.client";
+import { type ProjectDocument } from "../../models/project.model";
 import { type StoryAssetDocument, type StoryAssetType } from "../../models/story-asset.model";
 import { FacelessVideoRepository } from "../../repositories/faceless-video.repository";
 import { UploadHistoryRepository } from "../../repositories/upload-history.repository";
 import { JobService } from "../job/job.service";
 import { ProjectService } from "../project/project.service";
 import { QueueService } from "../queue/queue.service";
+import { RedditTrendingService } from "../redditStory/reddit-trending.service";
 
 export type FacelessStage = "script" | "audio" | "subtitles" | "scenes" | "render";
 
@@ -25,6 +27,15 @@ export interface CreateFacelessProjectInput {
   voice?: string;
   tone?: string;
   audience?: string;
+}
+
+export interface CreateTrendingRedditProjectInput {
+  userId: string;
+  title?: string;
+  description?: string;
+  subreddit?: string;
+  maxDurationSeconds?: number;
+  voice?: string;
 }
 
 interface StoryStagePayload {
@@ -56,11 +67,37 @@ export class FacelessVideoService {
     private readonly queueService: QueueService,
     private readonly pythonWorkerClient: PythonWorkerClient,
     private readonly facelessVideoRepository: FacelessVideoRepository,
+    private readonly redditTrendingService: RedditTrendingService,
     private readonly uploadHistoryRepository?: UploadHistoryRepository
   ) {}
 
   public createProject(input: CreateFacelessProjectInput) {
     return this.projectService.createFacelessStoryProject(input);
+  }
+
+  public async createTrendingRedditProject(input: CreateTrendingRedditProjectInput) {
+    const redditPost = await this.redditTrendingService.pickTrendingPost({
+      subreddit: input.subreddit
+    });
+
+    return this.projectService.createRedditStoryProject({
+      userId: input.userId,
+      title: input.title,
+      description: input.description,
+      subreddit: redditPost.subreddit,
+      maxDurationSeconds: input.maxDurationSeconds,
+      voice: input.voice,
+      redditSource: {
+        postId: redditPost.postId,
+        permalink: redditPost.permalink,
+        title: redditPost.title,
+        body: redditPost.body,
+        subreddit: redditPost.subreddit,
+        author: redditPost.author,
+        score: redditPost.score,
+        fetchedAt: redditPost.fetchedAt
+      }
+    });
   }
 
   public async enqueueStage(projectId: string, stage: FacelessStage, options: { autoRun?: boolean } = {}) {
@@ -189,7 +226,8 @@ export class FacelessVideoService {
       }
 
       if (payload.autoRun) {
-        const nextStage = NEXT_STAGE[payload.stage];
+        const project = await this.projectService.getProjectOrThrow(payload.projectId);
+        const nextStage = this.getNextStage(project.facelessSource, payload.stage);
         if (nextStage) {
           const nextJob = await this.enqueueStage(payload.projectId, nextStage, { autoRun: true });
           return { result, nextJob };
@@ -212,6 +250,12 @@ export class FacelessVideoService {
 
   private async processScript(payload: StoryStagePayload) {
     const project = await this.projectService.getProjectOrThrow(payload.projectId);
+    if (project.facelessSource === "reddit_trending" && project.redditSource) {
+      const script = await this.buildRedditStoryScript(payload, project);
+      await this.markJobCompleted(payload.jobId, { scriptId: script.id, sceneCount: script.scenes.length });
+      return script;
+    }
+
     if (!project.topic) {
       throw new AppError("A topic is required before generating a faceless script.", 409, "TOPIC_REQUIRED");
     }
@@ -331,6 +375,10 @@ export class FacelessVideoService {
       this.getScriptOrThrow(payload.projectId)
     ]);
 
+    if (project.facelessSource === "reddit_trending") {
+      throw new AppError("Reddit story projects render against the provided background video and skip scene generation.", 409, "REDDIT_SCENES_NOT_REQUIRED");
+    }
+
     const response = await this.pythonWorkerClient.requestFacelessScenes({
       jobId: payload.jobId,
       projectId: payload.projectId,
@@ -369,7 +417,7 @@ export class FacelessVideoService {
       .map((asset) => asset.absolutePath)
       .filter((assetPath): assetPath is string => typeof assetPath === "string" && assetPath.length > 0);
 
-    if (imagePaths.length === 0) {
+    if (project.facelessSource !== "reddit_trending" && imagePaths.length === 0) {
       throw new AppError("Scene images are required before rendering.", 409, "SCENE_IMAGES_REQUIRED");
     }
     if (!audioAsset.absolutePath) {
@@ -385,7 +433,8 @@ export class FacelessVideoService {
       scenes: this.toPythonScenes(script.scenes),
       imagePaths,
       audioPath: audioAsset.absolutePath,
-      subtitlesPath: subtitleAsset?.absolutePath
+      subtitlesPath: subtitleAsset?.absolutePath,
+      renderMode: project.facelessSource === "reddit_trending" ? "background_video" : "scene_images"
     });
 
     const [render, assets] = await Promise.all([
@@ -414,6 +463,141 @@ export class FacelessVideoService {
       assetIds: assets.map((asset) => asset.id)
     });
     return render;
+  }
+
+  private async buildRedditStoryScript(payload: StoryStagePayload, project: ProjectDocument) {
+    const redditSource = project.redditSource;
+    if (!redditSource) {
+      throw new AppError("Reddit source metadata is missing for this project.", 409, "REDDIT_SOURCE_REQUIRED");
+    }
+
+    const sceneChunks = this.buildRedditSceneChunks({
+      title: redditSource.title,
+      body: redditSource.body,
+      maxDurationSeconds: project.targetDurationSeconds ?? undefined
+    });
+
+    const title = project.title?.trim() || redditSource.title;
+    const narration = [redditSource.title, ...sceneChunks.map((scene) => scene.narration)].join("\n\n");
+    const captionText = redditSource.body;
+
+    const script = await this.facelessVideoRepository.upsertScript(payload.projectId, {
+      title,
+      hook: redditSource.title,
+      narration,
+      captionText,
+      imagePrompts: [],
+      scenes: sceneChunks
+    });
+
+    await this.projectService.updateProject(payload.projectId, {
+      title,
+      topic: redditSource.title,
+      workflowStage: "script",
+      status: "writing_script"
+    });
+
+    return script;
+  }
+
+  private buildRedditSceneChunks(input: {
+    title: string;
+    body: string;
+    maxDurationSeconds?: number;
+  }) {
+    const cleanedParagraphs = input.body
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
+      .filter((paragraph) => paragraph.length > 0);
+
+    const rawParts = cleanedParagraphs.length ? cleanedParagraphs : [input.body.replace(/\s+/g, " ").trim()];
+    const chunks: string[] = [];
+    const maxStoryWords = input.maxDurationSeconds
+      ? Math.max(Math.round(input.maxDurationSeconds * 2.35), 70)
+      : Number.POSITIVE_INFINITY;
+    let acceptedWords = 0;
+
+    for (const part of rawParts) {
+      if (this.wordCount(part) <= 55) {
+        if (acceptedWords >= maxStoryWords) {
+          break;
+        }
+
+        chunks.push(part);
+        acceptedWords += this.wordCount(part);
+        continue;
+      }
+
+      const sentences = part.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+      let buffer = "";
+
+      for (const sentence of sentences) {
+        const candidate = buffer ? `${buffer} ${sentence}` : sentence;
+        if (this.wordCount(candidate) <= 55) {
+          buffer = candidate;
+          continue;
+        }
+
+        if (buffer) {
+          if (acceptedWords >= maxStoryWords) {
+            break;
+          }
+          chunks.push(buffer);
+          acceptedWords += this.wordCount(buffer);
+        }
+        buffer = sentence;
+      }
+
+      if (buffer && acceptedWords < maxStoryWords) {
+        chunks.push(buffer);
+        acceptedWords += this.wordCount(buffer);
+      }
+
+      if (acceptedWords >= maxStoryWords) {
+        break;
+      }
+    }
+
+    const usableChunks = chunks.filter((chunk) => chunk.length > 0);
+    const totalWords = Math.max(this.wordCount(usableChunks.join(" ")), 1);
+    const estimatedStoryDuration = Math.max(Number((totalWords / 2.35).toFixed(2)), 15);
+    const totalDuration = input.maxDurationSeconds
+      ? Math.min(estimatedStoryDuration, input.maxDurationSeconds)
+      : estimatedStoryDuration;
+
+    return usableChunks.map((chunk, index) => {
+      const words = Math.max(this.wordCount(chunk), 1);
+      const proportionalDuration = Number(((words / totalWords) * totalDuration).toFixed(2));
+
+      return {
+        sceneIndex: index + 1,
+        narration: chunk,
+        imagePrompt: "Use the configured Reddit background gameplay video.",
+        durationSeconds: Math.max(proportionalDuration, 3),
+        captionText: chunk
+      };
+    });
+  }
+
+  private wordCount(value: string) {
+    return value.split(/\s+/).filter(Boolean).length;
+  }
+
+  private getNextStage(facelessSource: string | undefined, stage: FacelessStage): FacelessStage | undefined {
+    if (facelessSource === "reddit_trending") {
+      if (stage === "script") {
+        return "audio";
+      }
+      if (stage === "audio") {
+        return "subtitles";
+      }
+      if (stage === "subtitles") {
+        return "render";
+      }
+      return undefined;
+    }
+
+    return NEXT_STAGE[stage];
   }
 
   private async getScriptOrThrow(projectId: string) {

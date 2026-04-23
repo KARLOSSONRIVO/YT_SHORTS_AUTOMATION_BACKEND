@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { getAuthenticatedUser } from "../../../common/middlewares/require-auth.middleware";
 import { sendSuccess } from "../../../common/utils/api-response";
 import { FacelessVideoService, type FacelessStage } from "../../services/facelessVideo/faceless-video.service";
 import { PublishService } from "../../services/publish/publish.service";
@@ -12,13 +13,23 @@ export class ProjectController {
   ) {}
 
   public createProject = async (request: Request, response: Response): Promise<void> => {
-    const project = await this.facelessVideoService.createProject(request.body);
+    const project = await this.facelessVideoService.createProject({
+      ...request.body,
+      userId: getAuthenticatedUser(request).id
+    });
+    sendSuccess(response, project, 201);
+  };
+
+  public createTrendingRedditProject = async (request: Request, response: Response): Promise<void> => {
+    const project = await this.facelessVideoService.createTrendingRedditProject({
+      ...request.body,
+      userId: getAuthenticatedUser(request).id
+    });
     sendSuccess(response, project, 201);
   };
 
   public listProjects = async (request: Request, response: Response): Promise<void> => {
-    const userId = typeof request.query.userId === "string" ? request.query.userId : undefined;
-    const projects = await this.projectService.listProjects(userId);
+    const projects = await this.projectService.listProjects(getAuthenticatedUser(request).id);
     sendSuccess(response, projects);
   };
 

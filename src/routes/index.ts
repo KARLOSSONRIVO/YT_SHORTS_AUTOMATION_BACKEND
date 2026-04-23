@@ -1,5 +1,8 @@
 import { Router } from "express";
 import type { Multer } from "multer";
+import type { RequestHandler } from "express";
+import { asyncHandler } from "../common/middlewares/async-handler.middleware";
+import { validate } from "../common/middlewares/validate.middleware";
 import type { AuthController } from "../modules/controllers/auth/auth.controller";
 import type { ChannelController } from "../modules/controllers/channel/channel.controller";
 import type { ClipController } from "../modules/controllers/clip/clip.controller";
@@ -18,6 +21,7 @@ import { createProjectRoutes } from "./project/project.routes";
 import { createPublishRoutes } from "./publish/publish.routes";
 import { createSubtitleRoutes } from "./subtitle/subtitle.routes";
 import { createUploadRoutes } from "./upload/upload.routes";
+import { connectChannelCallbackQuerySchema } from "../modules/validators/channel.validator";
 
 export interface RouteControllers {
   authController: AuthController;
@@ -31,11 +35,21 @@ export interface RouteControllers {
   jobController: JobController;
 }
 
-export const createApiRouter = (controllers: RouteControllers, uploadMiddleware: Multer): Router => {
+export const createApiRouter = (
+  controllers: RouteControllers,
+  uploadMiddleware: Multer,
+  authMiddleware: RequestHandler
+): Router => {
   const router = Router();
 
   router.use("/auth", createAuthRoutes(controllers.authController));
   router.use("/health", createHealthRoutes(controllers.healthController));
+  router.get(
+    "/channel/oauth/callback",
+    validate({ query: connectChannelCallbackQuerySchema }),
+    asyncHandler(controllers.channelController.connectChannelFromCallback)
+  );
+  router.use(authMiddleware);
   router.use("/upload", createUploadRoutes(controllers.uploadController, uploadMiddleware));
   router.use("/project", createProjectRoutes(controllers.projectController));
   router.use("/projects", createProjectRoutes(controllers.projectController));

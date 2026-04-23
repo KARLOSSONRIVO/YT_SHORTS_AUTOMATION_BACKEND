@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { AppError } from "../../../common/errors/app-error";
+import { getAuthenticatedUser } from "../../../common/middlewares/require-auth.middleware";
 import { sendSuccess } from "../../../common/utils/api-response";
 import { UploadService } from "../../services/upload/upload.service";
 
@@ -13,6 +14,7 @@ export class UploadController {
 
     const result = await this.uploadService.createUploadWorkflow({
       ...request.body,
+      userId: getAuthenticatedUser(request).id,
       file: request.file
     });
 

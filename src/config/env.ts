@@ -16,6 +16,8 @@ const envSchema = z.object({
   YOUTUBE_CLIENT_SECRET: z.string().min(1),
   YOUTUBE_REDIRECT_URI: z.string().url(),
   FRONTEND_APP_URL: z.string().url().default("http://localhost:3000"),
+  AUTH_TOKEN_SECRET: z.string().min(16).default("shorts-studio-dev-auth-secret"),
+  AUTH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
   STORAGE_ROOT: z.string().default("./storage"),
   TEMP_UPLOAD_DIR: z.string().default("./storage/tmp"),
   MAX_FILE_SIZE_BYTES: z.coerce.number().int().positive().default(1024 * 1024 * 1024),

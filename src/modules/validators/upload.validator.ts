@@ -3,7 +3,6 @@ import { z } from "zod";
 const hexColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Use a hex color like #FFFFFF");
 
 export const createUploadBodySchema = z.object({
-  userId: z.string().min(1),
   title: z.string().min(3).max(160),
   description: z.string().max(5000).optional(),
   hashtags: z.string().max(300).optional(),

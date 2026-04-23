@@ -2,6 +2,7 @@ import { NotFoundError } from "../../../common/errors/not-found-error";
 import { ProjectRepository } from "../../repositories/project.repository";
 import {
   DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
+  type RedditSourceMetadata,
   type ProjectSubtitlePreferences
 } from "../../models/project.model";
 
@@ -24,6 +25,17 @@ export interface CreateFacelessStoryProjectInput {
   stylePreset?: string;
   voice?: string;
   subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
+}
+
+export interface CreateRedditStoryProjectInput {
+  userId: string;
+  title?: string;
+  description?: string;
+  subreddit: string;
+  maxDurationSeconds?: number;
+  voice?: string;
+  subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
+  redditSource: RedditSourceMetadata;
 }
 
 export class ProjectService {
@@ -53,11 +65,34 @@ export class ProjectService {
       title: input.title ?? input.topic,
       description: input.description,
       projectType: "faceless_story",
+      facelessSource: "topic",
       topic: input.topic,
-      platforms: input.platforms ?? ["youtube", "tiktok"],
+      platforms: input.platforms ?? ["youtube"],
       targetDurationSeconds: input.targetDurationSeconds ?? 45,
       stylePreset: input.stylePreset ?? "cinematic documentary",
       voice: input.voice ?? "af_sarah",
+      subtitlePreferences: {
+        ...DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
+        ...input.subtitlePreferences
+      },
+      status: "draft",
+      workflowStage: "draft"
+    });
+  }
+
+  public createRedditStoryProject(input: CreateRedditStoryProjectInput) {
+    return this.projectRepository.create({
+      userId: input.userId as never,
+      title: input.title ?? input.redditSource.title,
+      description: input.description,
+      projectType: "faceless_story",
+      facelessSource: "reddit_trending",
+      topic: input.redditSource.title,
+      platforms: ["youtube"],
+      targetDurationSeconds: input.maxDurationSeconds,
+      stylePreset: "reddit story gameplay",
+      voice: input.voice ?? "af_sarah",
+      redditSource: input.redditSource,
       subtitlePreferences: {
         ...DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
         ...input.subtitlePreferences

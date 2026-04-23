@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { getAuthenticatedUser } from "../../../common/middlewares/require-auth.middleware";
 import { sendSuccess } from "../../../common/utils/api-response";
 import { env } from "../../../config/env";
 import { ChannelService } from "../../services/channel/channel.service";
@@ -7,12 +8,12 @@ export class ChannelController {
   constructor(private readonly channelService: ChannelService) {}
 
   public getAuthorizationUrl = async (request: Request, response: Response): Promise<void> => {
-    const result = this.channelService.getConnectionUrl(request.query.userId as string);
+    const result = this.channelService.getConnectionUrl(getAuthenticatedUser(request).id);
     sendSuccess(response, result);
   };
 
   public connectChannel = async (request: Request, response: Response): Promise<void> => {
-    const channel = await this.channelService.connectChannel(request.body.userId, request.body.code);
+    const channel = await this.channelService.connectChannel(getAuthenticatedUser(request).id, request.body.code);
     sendSuccess(response, channel, 201);
   };
 
@@ -26,15 +27,12 @@ export class ChannelController {
   };
 
   public listChannels = async (request: Request, response: Response): Promise<void> => {
-    const channels = await this.channelService.listChannels(request.query.userId as string);
+    const channels = await this.channelService.listChannels(getAuthenticatedUser(request).id);
     sendSuccess(response, channels);
   };
 
   public disconnectChannel = async (request: Request, response: Response): Promise<void> => {
-    const channel = await this.channelService.disconnectChannel(
-      request.query.userId as string,
-      String(request.params.channelId)
-    );
+    const channel = await this.channelService.disconnectChannel(getAuthenticatedUser(request).id, String(request.params.channelId));
     sendSuccess(response, channel);
   };
 }
