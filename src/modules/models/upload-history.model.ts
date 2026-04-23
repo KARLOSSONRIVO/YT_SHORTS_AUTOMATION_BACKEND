@@ -5,6 +5,8 @@ export interface UploadHistory {
   projectId?: Types.ObjectId;
   channelId: Types.ObjectId;
   youtubeVideoId?: string;
+  localArchiveStorageKey?: string;
+  localArchiveMetadataKey?: string;
   title: string;
   description?: string;
   privacyStatus: "private" | "public" | "unlisted";
@@ -20,6 +22,8 @@ const uploadHistorySchema = new Schema<UploadHistory>(
     projectId: { type: Schema.Types.ObjectId, ref: "Project", index: true },
     channelId: { type: Schema.Types.ObjectId, ref: "Channel", required: true, index: true },
     youtubeVideoId: { type: String },
+    localArchiveStorageKey: { type: String },
+    localArchiveMetadataKey: { type: String },
     title: { type: String, required: true },
     description: { type: String },
     privacyStatus: { type: String, enum: ["private", "public", "unlisted"], default: "private" },

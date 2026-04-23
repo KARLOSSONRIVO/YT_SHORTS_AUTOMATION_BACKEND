@@ -131,7 +131,10 @@ export class RenderService {
     };
   }
 
-  public async deleteRenderedClipOutput(outputStorageKey: string) {
-    await this.storageService.delete(outputStorageKey);
+  public async deleteRenderedClipAssets(outputStorageKey?: string, subtitleStorageKey?: string) {
+    await Promise.all([
+      outputStorageKey ? this.storageService.delete(outputStorageKey) : Promise.resolve(),
+      subtitleStorageKey ? this.storageService.delete(subtitleStorageKey) : Promise.resolve()
+    ]);
   }
 }

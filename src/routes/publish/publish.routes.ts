@@ -7,7 +7,7 @@ import { publishClipSchema } from "../../modules/validators/publish.validator";
 export const createPublishRoutes = (publishController: PublishController): Router => {
   const router = Router();
 
-  router.post("/", validate({ body: publishClipSchema }), asyncHandler(publishController.queuePublish));
+  router.post("/", validate({ body: publishClipSchema }), asyncHandler(publishController.publishNow));
 
   return router;
 };

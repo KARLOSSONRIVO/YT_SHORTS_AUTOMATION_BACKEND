@@ -5,8 +5,8 @@ import { PublishService } from "../../services/publish/publish.service";
 export class PublishController {
   constructor(private readonly publishService: PublishService) {}
 
-  public queuePublish = async (request: Request, response: Response): Promise<void> => {
-    const result = await this.publishService.queueClipPublish(request.body);
-    sendSuccess(response, result, 202);
+  public publishNow = async (request: Request, response: Response): Promise<void> => {
+    const result = await this.publishService.publishClipNow(request.body);
+    sendSuccess(response, result, 201);
   };
 }

@@ -1,20 +1,30 @@
 import type { Request, Response } from "express";
 import { sendSuccess } from "../../../common/utils/api-response";
 import { ClipService } from "../../services/clip/clip.service";
+import { ProjectService } from "../../services/project/project.service";
 import { RenderService } from "../../services/render/render.service";
 import { SourceVideoService } from "../../services/sourceVideo/source-video.service";
+import { UploadHistoryRepository } from "../../repositories/upload-history.repository";
 
 export class ClipController {
   constructor(
     private readonly clipService: ClipService,
     private readonly renderService: RenderService,
-    private readonly sourceVideoService: SourceVideoService
+    private readonly sourceVideoService: SourceVideoService,
+    private readonly uploadHistoryRepository: UploadHistoryRepository,
+    private readonly projectService: ProjectService
   ) {}
 
   private serializeClip = (
     request: Request,
     clip: { toObject(): Record<string, unknown> } | null,
-    sourceVideoStorageKey?: string
+    sourceVideoStorageKey?: string,
+    publishInfo?: {
+      youtubeVideoId?: string;
+      youtubeVideoUrl?: string;
+      localArchiveStorageKey?: string;
+      localArchiveMetadataKey?: string;
+    }
   ) => {
     if (!clip) {
       return clip;
@@ -38,7 +48,11 @@ export class ClipController {
       sourceVideoUrl: sourceVideoStorageKey ? `${baseUrl}/media/${sourceVideoStorageKey}` : undefined,
       outputUrl: serializedClip.outputStorageKey
         ? `${baseUrl}/media/${serializedClip.outputStorageKey}${renderVersionSuffix}`
-        : undefined
+        : undefined,
+      youtubeVideoId: publishInfo?.youtubeVideoId,
+      youtubeVideoUrl: publishInfo?.youtubeVideoUrl,
+      localArchiveStorageKey: publishInfo?.localArchiveStorageKey,
+      localArchiveMetadataKey: publishInfo?.localArchiveMetadataKey
     };
   };
 
@@ -49,7 +63,36 @@ export class ClipController {
       this.sourceVideoService.getByProjectIdOrThrow(projectId)
     ]);
 
-    sendSuccess(response, clips.map((clip) => this.serializeClip(request, clip, sourceVideo.storageKey)));
+    const publishInfoEntries = await Promise.all(
+      clips.map(async (clip) => {
+        const latestUpload = await this.uploadHistoryRepository.findLatestByClipId(clip.id);
+        return [
+          clip.id,
+          latestUpload?.youtubeVideoId
+            ? {
+                youtubeVideoId: latestUpload.youtubeVideoId,
+                youtubeVideoUrl: `https://www.youtube.com/watch?v=${latestUpload.youtubeVideoId}`,
+                localArchiveStorageKey: latestUpload.localArchiveStorageKey,
+                localArchiveMetadataKey: latestUpload.localArchiveMetadataKey
+              }
+            : latestUpload?.localArchiveStorageKey || latestUpload?.localArchiveMetadataKey
+              ? {
+                  localArchiveStorageKey: latestUpload.localArchiveStorageKey,
+                  localArchiveMetadataKey: latestUpload.localArchiveMetadataKey
+                }
+              : undefined
+        ] as const;
+      })
+    );
+
+    const publishInfoByClipId = new Map(publishInfoEntries);
+
+    sendSuccess(
+      response,
+      clips.map((clip) =>
+        this.serializeClip(request, clip, sourceVideo.storageKey, publishInfoByClipId.get(clip.id))
+      )
+    );
   };
 
   public reviewClip = async (request: Request, response: Response): Promise<void> => {
@@ -61,11 +104,75 @@ export class ClipController {
     }
 
     if (request.body.reviewStatus === "rejected" && clip?.outputStorageKey) {
-      await this.renderService.deleteRenderedClipOutput(clip.outputStorageKey);
+      await this.renderService.deleteRenderedClipAssets(clip.outputStorageKey, clip.subtitleStorageKey);
       clip = await this.clipService.clearRenderedOutput(clipId);
     }
 
-    const sourceVideo = clip ? await this.sourceVideoService.getByProjectIdOrThrow(`${clip.projectId}`) : undefined;
-    sendSuccess(response, this.serializeClip(request, clip, sourceVideo?.storageKey));
+    if (clip) {
+      await this.syncUploadedVideoProjectWorkflow(`${clip.projectId}`);
+    }
+
+    const [sourceVideo, latestUpload] = clip
+      ? await Promise.all([
+          this.sourceVideoService.getByProjectIdOrThrow(`${clip.projectId}`),
+          this.uploadHistoryRepository.findLatestByClipId(clip.id)
+        ])
+      : [undefined, undefined];
+
+    sendSuccess(
+      response,
+      this.serializeClip(
+        request,
+        clip,
+        sourceVideo?.storageKey,
+        latestUpload?.youtubeVideoId
+          ? {
+              youtubeVideoId: latestUpload.youtubeVideoId,
+              youtubeVideoUrl: `https://www.youtube.com/watch?v=${latestUpload.youtubeVideoId}`,
+              localArchiveStorageKey: latestUpload.localArchiveStorageKey,
+              localArchiveMetadataKey: latestUpload.localArchiveMetadataKey
+            }
+          : latestUpload?.localArchiveStorageKey || latestUpload?.localArchiveMetadataKey
+            ? {
+                localArchiveStorageKey: latestUpload.localArchiveStorageKey,
+                localArchiveMetadataKey: latestUpload.localArchiveMetadataKey
+              }
+            : undefined
+      )
+    );
   };
+
+  private async syncUploadedVideoProjectWorkflow(projectId: string) {
+    const projectClips = await this.clipService.listByProjectId(projectId);
+    const hasPendingReview = projectClips.some((clip) => clip.reviewStatus === "pending_review");
+    const hasApprovedAwaitingRender = projectClips.some(
+      (clip) =>
+        clip.reviewStatus === "approved" &&
+        clip.renderStatus !== "rendered" &&
+        clip.renderStatus !== "failed"
+    );
+    const hasApprovedAwaitingPublish = projectClips.some(
+      (clip) =>
+        clip.reviewStatus === "approved" &&
+        clip.renderStatus === "rendered" &&
+        clip.publishStatus !== "published"
+    );
+
+    if (hasPendingReview) {
+      await this.projectService.updateWorkflow(projectId, "review", "review");
+      return;
+    }
+
+    if (hasApprovedAwaitingRender) {
+      await this.projectService.updateWorkflow(projectId, "render", "processing");
+      return;
+    }
+
+    if (!hasApprovedAwaitingPublish) {
+      await this.projectService.updateWorkflow(projectId, "completed", "completed");
+      return;
+    }
+
+    await this.projectService.updateWorkflow(projectId, "publish", "processing");
+  }
 }

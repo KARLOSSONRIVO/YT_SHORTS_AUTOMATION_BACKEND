@@ -135,6 +135,55 @@ export const createApplicationContainer = async () => {
     publishService
   );
 
+  const reconcileUploadedVideoProjectWorkflows = async () => {
+    const uploadedVideoProjects = await projectRepository.findMany({ projectType: "uploaded_video" });
+
+    await Promise.all(
+      uploadedVideoProjects.map(async (project) => {
+        const projectClips = await clipService.listByProjectId(project.id);
+
+        if (projectClips.length === 0) {
+          return;
+        }
+
+        const hasPendingReview = projectClips.some((clip) => clip.reviewStatus === "pending_review");
+        const hasApprovedAwaitingRender = projectClips.some(
+          (clip) =>
+            clip.reviewStatus === "approved" &&
+            clip.renderStatus !== "rendered" &&
+            clip.renderStatus !== "failed"
+        );
+        const hasApprovedAwaitingPublish = projectClips.some(
+          (clip) =>
+            clip.reviewStatus === "approved" &&
+            clip.renderStatus === "rendered" &&
+            clip.publishStatus !== "published"
+        );
+
+        let nextWorkflowStage: "review" | "render" | "publish" | "completed" = "completed";
+        let nextStatus: "review" | "processing" | "completed" = "completed";
+
+        if (hasPendingReview) {
+          nextWorkflowStage = "review";
+          nextStatus = "review";
+        } else if (hasApprovedAwaitingRender) {
+          nextWorkflowStage = "render";
+          nextStatus = "processing";
+        } else if (hasApprovedAwaitingPublish) {
+          nextWorkflowStage = "publish";
+          nextStatus = "processing";
+        }
+
+        if (project.workflowStage !== nextWorkflowStage || project.status !== nextStatus) {
+          await projectService.updateWorkflow(project.id, nextWorkflowStage, nextStatus);
+        }
+      })
+    );
+  };
+
+  await reconcileUploadedVideoProjectWorkflows();
+  await publishService.backfillPublishedArchives();
+
   const uploadMiddleware = multer({
     dest: env.TEMP_UPLOAD_DIR,
     limits: {
@@ -169,11 +218,17 @@ export const createApplicationContainer = async () => {
       healthController: new HealthController(redisConnection),
       uploadController: new UploadController(uploadService),
       projectController: new ProjectController(projectService, facelessVideoService, publishService),
-      clipController: new ClipController(clipService, renderService, sourceVideoService),
       subtitleController: new SubtitleController(subtitleService),
       channelController: new ChannelController(channelService),
       publishController: new PublishController(publishService),
-      jobController: new JobController(jobService)
+      jobController: new JobController(jobService),
+      clipController: new ClipController(
+        clipService,
+        renderService,
+        sourceVideoService,
+        uploadHistoryRepository,
+        projectService
+      )
     },
     shutdown: async () => {
       await closeQueues(queues);

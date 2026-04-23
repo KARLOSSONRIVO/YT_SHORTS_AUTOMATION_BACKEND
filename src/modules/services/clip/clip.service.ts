@@ -74,6 +74,7 @@ export class ClipService {
   public clearRenderedOutput(clipId: string) {
     return this.clipRepository.updateById(clipId, {
       outputStorageKey: undefined,
+      subtitleStorageKey: undefined,
       renderStatus: "queued",
       publishStatus: "not_ready"
     });

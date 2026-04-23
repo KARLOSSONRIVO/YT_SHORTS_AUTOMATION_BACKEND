@@ -60,6 +60,7 @@ export class PublishService {
 
     await this.jobService.updateJob(persistedJob.id, { externalJobId: `${enqueuedJob.id}` });
     await this.clipService.markPublishQueued(input.clipId);
+    await this.projectService?.updateWorkflow(`${clip.projectId}`, "publish", "processing");
 
     return {
       jobId: persistedJob.id,
@@ -78,10 +79,13 @@ export class PublishService {
   }) {
     const clip = await this.clipService.getClipOrThrow(input.clipId);
     const channel = await this.channelService.getChannelOrThrow(input.channelId);
+    const project = await this.projectService?.getProjectOrThrow(`${clip.projectId}`);
 
     if (!clip.outputStorageKey) {
       throw new AppError("Clip output is missing and cannot be uploaded.", 409, "CLIP_OUTPUT_MISSING");
     }
+
+    const clipVideoPath = this.storageService.resolveStoragePath(clip.outputStorageKey);
 
     const uploadedVideo = await this.youTubeService.uploadShort({
       tokens: {
@@ -92,13 +96,45 @@ export class PublishService {
       title: input.title,
       description: input.description,
       privacyStatus: input.privacyStatus,
-      videoPath: this.storageService.resolveStoragePath(clip.outputStorageKey)
+      videoPath: clipVideoPath
     });
+
+    const localArchive = project
+      ? await this.storageService.archivePublishedVideo({
+          projectTitle: project.title,
+          category: "clips",
+          fileLabel: `${clip.title}_${clip.id}`,
+          publishFolderName: this.buildPublishFolderName({
+            primaryId: `${clip.id}`,
+            youtubeVideoId: uploadedVideo.id ?? undefined,
+            publishedAt: new Date()
+          }),
+          sourceFilePath: clipVideoPath,
+          metadata: {
+            kind: "clip_publish",
+            projectId: `${clip.projectId}`,
+            projectTitle: project.title,
+            clipId: `${clip.id}`,
+            clipTitle: clip.title,
+            channelId: input.channelId,
+            channelTitle: channel.title,
+            youtubeVideoId: uploadedVideo.id ?? undefined,
+            youtubeVideoUrl: uploadedVideo.id ? `https://www.youtube.com/watch?v=${uploadedVideo.id}` : undefined,
+            title: input.title,
+            description: input.description,
+            privacyStatus: input.privacyStatus,
+            publishedAt: new Date().toISOString()
+          }
+        })
+      : undefined;
 
     const uploadHistory = await this.uploadHistoryRepository.create({
       clipId: clip.id as never,
+      projectId: clip.projectId as never,
       channelId: channel.id as never,
       youtubeVideoId: uploadedVideo.id ?? undefined,
+      localArchiveStorageKey: localArchive?.video.storageKey,
+      localArchiveMetadataKey: localArchive?.metadata.storageKey,
       title: input.title,
       description: input.description,
       privacyStatus: input.privacyStatus,
@@ -108,12 +144,14 @@ export class PublishService {
     });
 
     await this.clipService.markPublished(input.clipId);
+    await this.syncUploadedVideoProjectWorkflow(`${clip.projectId}`);
 
     return {
       clipId: input.clipId,
       channelId: input.channelId,
       uploadHistoryId: uploadHistory.id,
-      youtubeVideoId: uploadedVideo.id
+      youtubeVideoId: uploadedVideo.id,
+      videoUrl: uploadedVideo.id ? `https://www.youtube.com/watch?v=${uploadedVideo.id}` : undefined
     };
   }
 
@@ -157,10 +195,37 @@ export class PublishService {
         videoPath: tempVideoPath
       });
 
+      const localArchive = await this.storageService.archivePublishedVideo({
+        projectTitle: project.title,
+        category: "faceless",
+        fileLabel: `${input.title}_${project.id}`,
+        publishFolderName: this.buildPublishFolderName({
+          primaryId: `${project.id}`,
+          youtubeVideoId: uploadedVideo.id ?? undefined,
+          publishedAt: new Date()
+        }),
+        sourceFilePath: tempVideoPath,
+        metadata: {
+          kind: "faceless_publish",
+          projectId: input.projectId,
+          projectTitle: project.title,
+          channelId: input.channelId,
+          channelTitle: channel.title,
+          youtubeVideoId: uploadedVideo.id ?? undefined,
+          youtubeVideoUrl: uploadedVideo.id ? `https://www.youtube.com/watch?v=${uploadedVideo.id}` : undefined,
+          title: input.title,
+          description: input.description,
+          privacyStatus: input.privacyStatus,
+          publishedAt: new Date().toISOString()
+        }
+      });
+
       const uploadHistory = await this.uploadHistoryRepository.create({
         projectId: project.id as never,
         channelId: channel.id as never,
         youtubeVideoId: uploadedVideo.id ?? undefined,
+        localArchiveStorageKey: localArchive.video.storageKey,
+        localArchiveMetadataKey: localArchive.metadata.storageKey,
         title: input.title,
         description: input.description,
         privacyStatus: input.privacyStatus,
@@ -204,5 +269,150 @@ export class PublishService {
     }
 
     throw new AppError("Final video source could not be resolved for upload.", 409, "FINAL_VIDEO_SOURCE_MISSING");
+  }
+
+  private async syncUploadedVideoProjectWorkflow(projectId: string) {
+    if (!this.projectService) {
+      return;
+    }
+
+    const projectClips = await this.clipService.listByProjectId(projectId);
+    const hasPendingReview = projectClips.some((clip) => clip.reviewStatus === "pending_review");
+    const hasApprovedAwaitingRender = projectClips.some(
+      (clip) =>
+        clip.reviewStatus === "approved" &&
+        clip.renderStatus !== "rendered" &&
+        clip.renderStatus !== "failed"
+    );
+    const hasApprovedAwaitingPublish = projectClips.some(
+      (clip) =>
+        clip.reviewStatus === "approved" &&
+        clip.renderStatus === "rendered" &&
+        clip.publishStatus !== "published"
+    );
+
+    if (hasPendingReview) {
+      await this.projectService.updateWorkflow(projectId, "review", "review");
+      return;
+    }
+
+    if (hasApprovedAwaitingRender) {
+      await this.projectService.updateWorkflow(projectId, "render", "processing");
+      return;
+    }
+
+    if (!hasApprovedAwaitingPublish) {
+      await this.projectService.updateWorkflow(projectId, "completed", "completed");
+      return;
+    }
+
+    await this.projectService.updateWorkflow(projectId, "publish", "processing");
+  }
+
+  public async backfillPublishedArchives() {
+    const missingArchiveRecords = await this.uploadHistoryRepository.findMissingArchiveRecords();
+
+    for (const record of missingArchiveRecords) {
+      const source = await this.resolveArchiveSource(record);
+      if (!source) {
+        continue;
+      }
+
+      const recordId = record.id ?? `${record._id}`;
+      const publishedAt = record.uploadedAt ?? new Date();
+      const archive = await this.storageService.archivePublishedVideo({
+        projectTitle: source.projectTitle,
+        category: source.category,
+        fileLabel: source.fileLabel,
+        publishFolderName: this.buildPublishFolderName({
+          primaryId: source.primaryId,
+          youtubeVideoId: record.youtubeVideoId,
+          publishedAt
+        }),
+        sourceFilePath: source.sourceFilePath,
+        metadata: {
+          kind: source.category === "clips" ? "clip_publish" : "faceless_publish",
+          projectId: source.projectId,
+          projectTitle: source.projectTitle,
+          clipId: source.clipId,
+          channelId: `${record.channelId}`,
+          youtubeVideoId: record.youtubeVideoId,
+          youtubeVideoUrl: record.youtubeVideoId ? `https://www.youtube.com/watch?v=${record.youtubeVideoId}` : undefined,
+          title: record.title,
+          description: record.description,
+          privacyStatus: record.privacyStatus,
+          publishedAt: publishedAt.toISOString()
+        }
+      });
+
+      await this.uploadHistoryRepository.updateById(recordId, {
+        localArchiveStorageKey: archive.video.storageKey,
+        localArchiveMetadataKey: archive.metadata.storageKey
+      });
+    }
+  }
+
+  private buildPublishFolderName(input: {
+    primaryId: string;
+    youtubeVideoId?: string;
+    publishedAt: Date;
+  }) {
+    const timestamp = input.publishedAt.toISOString().replace(/[:.]/g, "-");
+    const suffix = input.youtubeVideoId ?? input.primaryId;
+    return `${timestamp}_${suffix}`;
+  }
+
+  private async resolveArchiveSource(record: {
+    id?: string;
+    _id?: { toString(): string };
+    clipId?: { toString(): string } | string;
+    projectId?: { toString(): string } | string;
+  }) {
+    const clipId = record.clipId ? `${record.clipId}` : undefined;
+    if (clipId) {
+      const clip = await this.clipService.getClipOrThrow(clipId).catch(() => null);
+      if (!clip?.outputStorageKey) {
+        return null;
+      }
+
+      const project = this.projectService ? await this.projectService.getProjectOrThrow(`${clip.projectId}`).catch(() => null) : null;
+      if (!project) {
+        return null;
+      }
+
+      return {
+        category: "clips" as const,
+        projectId: `${clip.projectId}`,
+        projectTitle: project.title,
+        clipId: `${clip.id}`,
+        primaryId: `${clip.id}`,
+        fileLabel: `${clip.title}_${clip.id}`,
+        sourceFilePath: this.storageService.resolveStoragePath(clip.outputStorageKey)
+      };
+    }
+
+    const projectId = record.projectId ? `${record.projectId}` : undefined;
+    if (!projectId || !this.projectService || !this.facelessVideoRepository) {
+      return null;
+    }
+
+    const [project, finalVideoAsset] = await Promise.all([
+      this.projectService.getProjectOrThrow(projectId).catch(() => null),
+      this.facelessVideoRepository.findLatestAssetByType(projectId, "final_video").catch(() => null)
+    ]);
+
+    if (!project || !finalVideoAsset?.absolutePath) {
+      return null;
+    }
+
+    return {
+      category: "faceless" as const,
+      projectId,
+      projectTitle: project.title,
+      clipId: undefined,
+      primaryId: projectId,
+      fileLabel: `${project.title}_${projectId}`,
+      sourceFilePath: finalVideoAsset.absolutePath
+    };
   }
 }
