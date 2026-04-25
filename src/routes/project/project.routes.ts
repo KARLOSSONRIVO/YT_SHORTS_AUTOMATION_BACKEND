@@ -36,6 +36,11 @@ export const createProjectRoutes = (projectController: ProjectController): Route
     validate({ params: projectIdParamsSchema }),
     asyncHandler(projectController.generateScript)
   );
+  router.delete(
+    "/:projectId",
+    validate({ params: projectIdParamsSchema }),
+    asyncHandler(projectController.deleteProject)
+  );
   router.post(
     "/:projectId/run",
     validate({ params: projectIdParamsSchema }),

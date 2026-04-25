@@ -68,4 +68,12 @@ export class FacelessVideoRepository {
   public findRender(projectId: string): Promise<VideoRenderDocument | null> {
     return VideoRenderModel.findOne({ projectId }).exec();
   }
+
+  public async deleteProjectData(projectId: string) {
+    await Promise.all([
+      StoryScriptModel.deleteMany({ projectId }).exec(),
+      StoryAssetModel.deleteMany({ projectId }).exec(),
+      VideoRenderModel.deleteMany({ projectId }).exec()
+    ]);
+  }
 }

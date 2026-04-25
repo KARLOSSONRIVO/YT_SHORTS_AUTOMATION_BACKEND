@@ -12,4 +12,12 @@ export class TranscriptRepository {
   public updateById(transcriptId: string, update: Partial<Transcript>): Promise<TranscriptDocument | null> {
     return TranscriptModel.findByIdAndUpdate(transcriptId, update, { new: true }).exec();
   }
+
+  public findManyByProjectId(projectId: string): Promise<TranscriptDocument[]> {
+    return TranscriptModel.find({ projectId }).sort({ createdAt: -1 }).exec();
+  }
+
+  public deleteByProjectId(projectId: string) {
+    return TranscriptModel.deleteMany({ projectId }).exec();
+  }
 }

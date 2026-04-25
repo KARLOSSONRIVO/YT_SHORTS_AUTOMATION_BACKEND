@@ -3,13 +3,15 @@ import { getAuthenticatedUser } from "../../../common/middlewares/require-auth.m
 import { sendSuccess } from "../../../common/utils/api-response";
 import { FacelessVideoService, type FacelessStage } from "../../services/facelessVideo/faceless-video.service";
 import { PublishService } from "../../services/publish/publish.service";
+import { ProjectCleanupService } from "../../services/project/project-cleanup.service";
 import { ProjectService } from "../../services/project/project.service";
 
 export class ProjectController {
   constructor(
     private readonly projectService: ProjectService,
     private readonly facelessVideoService: FacelessVideoService,
-    private readonly publishService: PublishService
+    private readonly publishService: PublishService,
+    private readonly projectCleanupService: ProjectCleanupService
   ) {}
 
   public createProject = async (request: Request, response: Response): Promise<void> => {
@@ -106,6 +108,11 @@ export class ProjectController {
       privacyStatus: request.body.privacyStatus
     });
     sendSuccess(response, result, 201);
+  };
+
+  public deleteProject = async (request: Request, response: Response): Promise<void> => {
+    const result = await this.projectCleanupService.deleteProject(String(request.params.projectId));
+    sendSuccess(response, result);
   };
 
   private async enqueueFacelessStage(request: Request, response: Response, stage: FacelessStage): Promise<void> {

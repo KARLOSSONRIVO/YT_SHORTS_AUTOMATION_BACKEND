@@ -188,6 +188,11 @@ export interface PythonFacelessRenderResponse {
   duration_seconds: number;
 }
 
+export interface PythonProjectOutputCleanupResponse {
+  project_id: string;
+  deleted: boolean;
+}
+
 interface UploadRequestInput {
   filePath: string;
   fileName: string;
@@ -364,6 +369,7 @@ export class PythonWorkerClient {
     jobId: string;
     projectId: string;
     projectTitle?: string;
+    outputBucket?: string;
     narration: string;
     voice?: string;
     speakingRate?: number;
@@ -372,6 +378,7 @@ export class PythonWorkerClient {
       job_id: input.jobId,
       project_id: input.projectId,
       project_title: input.projectTitle,
+      output_bucket: input.outputBucket,
       narration: input.narration,
       voice: input.voice,
       speaking_rate: input.speakingRate ?? 0.82
@@ -401,15 +408,35 @@ export class PythonWorkerClient {
     jobId: string;
     projectId: string;
     projectTitle?: string;
+    outputBucket?: string;
     audioPath?: string;
     scenes: PythonFacelessScene[];
+    subtitlePreferences?: {
+      fontFamily?: string;
+      fontSize?: number;
+      fillColor?: string;
+      strokeColor?: string;
+      highlightColor?: string;
+      position?: "bottom_center" | "top_center" | "middle_center";
+      maxCharsPerLine?: number;
+      maxLines?: number;
+    };
   }): Promise<PythonFacelessSubtitleResponse> {
     const response = await this.client.post<PythonFacelessSubtitleResponse>("/internal/faceless/generate-subtitles", {
       job_id: input.jobId,
       project_id: input.projectId,
       project_title: input.projectTitle,
+      output_bucket: input.outputBucket,
       audio_path: input.audioPath,
-      scenes: input.scenes
+      scenes: input.scenes,
+      font_family: input.subtitlePreferences?.fontFamily,
+      font_size: input.subtitlePreferences?.fontSize,
+      fill_color: input.subtitlePreferences?.fillColor,
+      stroke_color: input.subtitlePreferences?.strokeColor,
+      highlight_color: input.subtitlePreferences?.highlightColor,
+      position: input.subtitlePreferences?.position,
+      max_chars_per_line: input.subtitlePreferences?.maxCharsPerLine,
+      max_lines: input.subtitlePreferences?.maxLines
     });
 
     return response.data;
@@ -419,6 +446,7 @@ export class PythonWorkerClient {
     jobId: string;
     projectId: string;
     projectTitle?: string;
+    outputBucket?: string;
     scenes: PythonFacelessScene[];
     visualStyle?: string;
   }): Promise<PythonFacelessSceneImageResponse> {
@@ -426,6 +454,7 @@ export class PythonWorkerClient {
       job_id: input.jobId,
       project_id: input.projectId,
       project_title: input.projectTitle,
+      output_bucket: input.outputBucket,
       scenes: input.scenes,
       visual_style: input.visualStyle
     });
@@ -437,6 +466,7 @@ export class PythonWorkerClient {
     jobId: string;
     projectId: string;
     projectTitle?: string;
+    outputBucket?: string;
     scenes: PythonFacelessScene[];
     imagePaths: string[];
     audioPath: string;
@@ -449,6 +479,7 @@ export class PythonWorkerClient {
       job_id: input.jobId,
       project_id: input.projectId,
       project_title: input.projectTitle,
+      output_bucket: input.outputBucket,
       scenes: input.scenes,
       image_paths: input.imagePaths,
       audio_path: input.audioPath,
@@ -457,6 +488,23 @@ export class PythonWorkerClient {
       background_video_path: input.backgroundVideoPath,
       render_mode: input.renderMode ?? "scene_images"
     });
+
+    return response.data;
+  }
+
+  public async requestProjectOutputCleanup(input: {
+    projectId: string;
+    projectTitle?: string;
+    outputBucket?: string;
+  }): Promise<PythonProjectOutputCleanupResponse> {
+    const response = await this.client.post<PythonProjectOutputCleanupResponse>(
+      "/internal/faceless/cleanup-project-output",
+      {
+        project_id: input.projectId,
+        project_title: input.projectTitle,
+        output_bucket: input.outputBucket
+      }
+    );
 
     return response.data;
   }

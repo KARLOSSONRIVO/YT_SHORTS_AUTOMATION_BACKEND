@@ -32,4 +32,20 @@ export class QueueService {
   public addUploadJob(payload: Record<string, unknown>) {
     return this.add("UPLOAD", "clip.upload.requested", payload);
   }
+
+  public async removeExternalJob(
+    queueName: (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES],
+    externalJobId?: string
+  ): Promise<void> {
+    if (!externalJobId) {
+      return;
+    }
+
+    const queueJob = await this.queues[queueName].getJob(externalJobId);
+    if (!queueJob) {
+      return;
+    }
+
+    await queueJob.remove().catch(() => undefined);
+  }
 }

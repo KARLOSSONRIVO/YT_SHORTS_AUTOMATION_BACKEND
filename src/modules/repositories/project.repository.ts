@@ -17,4 +17,8 @@ export class ProjectRepository {
   public updateById(projectId: string, update: UpdateQuery<Project>): Promise<ProjectDocument | null> {
     return ProjectModel.findByIdAndUpdate(projectId, update, { new: true }).exec();
   }
+
+  public deleteById(projectId: string): Promise<ProjectDocument | null> {
+    return ProjectModel.findByIdAndDelete(projectId).exec();
+  }
 }

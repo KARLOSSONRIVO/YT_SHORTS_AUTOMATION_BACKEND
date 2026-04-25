@@ -9,7 +9,15 @@ export class SourceVideoRepository {
     return SourceVideoModel.findOne({ projectId }).sort({ createdAt: -1 }).exec();
   }
 
+  public findManyByProjectId(projectId: string): Promise<SourceVideoDocument[]> {
+    return SourceVideoModel.find({ projectId }).sort({ createdAt: -1 }).exec();
+  }
+
   public updateById(sourceVideoId: string, update: Partial<SourceVideo>): Promise<SourceVideoDocument | null> {
     return SourceVideoModel.findByIdAndUpdate(sourceVideoId, update, { new: true }).exec();
+  }
+
+  public deleteByProjectId(projectId: string) {
+    return SourceVideoModel.deleteMany({ projectId }).exec();
   }
 }

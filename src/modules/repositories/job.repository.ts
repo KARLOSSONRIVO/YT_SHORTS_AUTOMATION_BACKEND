@@ -16,4 +16,8 @@ export class JobRepository {
   public updateById(jobId: string, update: Partial<Job>): Promise<JobDocument | null> {
     return JobModel.findByIdAndUpdate(jobId, update, { new: true }).exec();
   }
+
+  public deleteByProjectId(projectId: string) {
+    return JobModel.deleteMany({ projectId }).exec();
+  }
 }

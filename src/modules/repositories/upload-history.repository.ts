@@ -22,7 +22,15 @@ export class UploadHistoryRepository {
     return UploadHistoryModel.findOne({ projectId }).sort({ uploadedAt: -1, createdAt: -1 }).exec();
   }
 
+  public findByProjectId(projectId: string): Promise<UploadHistoryDocument[]> {
+    return UploadHistoryModel.find({ projectId }).sort({ createdAt: -1 }).exec();
+  }
+
   public updateById(uploadHistoryId: string, update: Partial<UploadHistory>): Promise<UploadHistoryDocument | null> {
     return UploadHistoryModel.findByIdAndUpdate(uploadHistoryId, update, { new: true }).exec();
+  }
+
+  public deleteByProjectId(projectId: string) {
+    return UploadHistoryModel.deleteMany({ projectId }).exec();
   }
 }

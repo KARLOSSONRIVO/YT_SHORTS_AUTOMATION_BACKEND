@@ -80,6 +80,7 @@ export class PublishService {
     const clip = await this.clipService.getClipOrThrow(input.clipId);
     const channel = await this.channelService.getChannelOrThrow(input.channelId);
     const project = await this.projectService?.getProjectOrThrow(`${clip.projectId}`);
+    const normalizedTitle = this.normalizeUploadTitle(input.title, clip.title || project?.title || "Short Clip");
 
     if (!clip.outputStorageKey) {
       throw new AppError("Clip output is missing and cannot be uploaded.", 409, "CLIP_OUTPUT_MISSING");
@@ -93,7 +94,7 @@ export class PublishService {
         refresh_token: channel.refreshToken,
         expiry_date: channel.tokenExpiryDate?.getTime()
       },
-      title: input.title,
+      title: normalizedTitle,
       description: input.description,
       privacyStatus: input.privacyStatus,
       videoPath: clipVideoPath
@@ -120,7 +121,7 @@ export class PublishService {
             channelTitle: channel.title,
             youtubeVideoId: uploadedVideo.id ?? undefined,
             youtubeVideoUrl: uploadedVideo.id ? `https://www.youtube.com/watch?v=${uploadedVideo.id}` : undefined,
-            title: input.title,
+            title: normalizedTitle,
             description: input.description,
             privacyStatus: input.privacyStatus,
             publishedAt: new Date().toISOString()
@@ -135,7 +136,7 @@ export class PublishService {
       youtubeVideoId: uploadedVideo.id ?? undefined,
       localArchiveStorageKey: localArchive?.video.storageKey,
       localArchiveMetadataKey: localArchive?.metadata.storageKey,
-      title: input.title,
+      title: normalizedTitle,
       description: input.description,
       privacyStatus: input.privacyStatus,
       status: "uploaded",
@@ -171,6 +172,7 @@ export class PublishService {
       this.channelService.getChannelOrThrow(input.channelId),
       this.facelessVideoRepository.findLatestAssetByType(input.projectId, "final_video")
     ]);
+    const normalizedTitle = this.normalizeUploadTitle(input.title, project.title || "Reddit Story");
 
     if (project.projectType !== "faceless_story") {
       throw new AppError("Only faceless story projects can be published from this endpoint.", 409, "PROJECT_NOT_FACELESS");
@@ -189,7 +191,7 @@ export class PublishService {
           refresh_token: channel.refreshToken,
           expiry_date: channel.tokenExpiryDate?.getTime()
         },
-        title: input.title,
+        title: normalizedTitle,
         description: input.description,
         privacyStatus: input.privacyStatus,
         videoPath: tempVideoPath
@@ -213,7 +215,7 @@ export class PublishService {
           channelTitle: channel.title,
           youtubeVideoId: uploadedVideo.id ?? undefined,
           youtubeVideoUrl: uploadedVideo.id ? `https://www.youtube.com/watch?v=${uploadedVideo.id}` : undefined,
-          title: input.title,
+          title: normalizedTitle,
           description: input.description,
           privacyStatus: input.privacyStatus,
           publishedAt: new Date().toISOString()
@@ -226,7 +228,7 @@ export class PublishService {
         youtubeVideoId: uploadedVideo.id ?? undefined,
         localArchiveStorageKey: localArchive.video.storageKey,
         localArchiveMetadataKey: localArchive.metadata.storageKey,
-        title: input.title,
+        title: normalizedTitle,
         description: input.description,
         privacyStatus: input.privacyStatus,
         status: "uploaded",
@@ -360,6 +362,28 @@ export class PublishService {
     const timestamp = input.publishedAt.toISOString().replace(/[:.]/g, "-");
     const suffix = input.youtubeVideoId ?? input.primaryId;
     return `${timestamp}_${suffix}`;
+  }
+
+  private normalizeUploadTitle(rawTitle: string, fallbackTitle: string) {
+    const candidate = rawTitle && rawTitle.trim().length > 0 ? rawTitle : fallbackTitle;
+    const sanitized = candidate
+      .replace(/[\x00-\x1F\x7F]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const trimmed = sanitized.slice(0, 100).trim();
+
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+
+    const fallback = fallbackTitle
+      .replace(/[\x00-\x1F\x7F]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 100)
+      .trim();
+
+    return fallback || "YouTube Short";
   }
 
   private async resolveArchiveSource(record: {

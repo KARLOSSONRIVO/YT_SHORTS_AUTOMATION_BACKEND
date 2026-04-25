@@ -21,22 +21,25 @@ export const createFacelessProjectBodySchema = z.object({
 });
 
 export const createTrendingRedditProjectBodySchema = z.object({
-  title: z.string().min(1).max(120).optional(),
-  description: z.string().max(5000).optional(),
-  subreddit: z
-    .string()
-    .min(2)
-    .max(64)
-    .regex(/^[A-Za-z0-9_]+$/, "Subreddit can only contain letters, numbers, and underscores.")
-    .default("AskReddit")
-    .optional(),
   maxDurationSeconds: z.coerce.number().int().min(15).max(180).optional(),
-  voice: z.string().min(1).max(80).default("af_sarah").optional()
+  voice: z.string().min(1).max(80).default("af_sarah").optional(),
+  subtitlePreferences: z
+    .object({
+      fontFamily: z.string().min(1).max(120).optional(),
+      fontSize: z.coerce.number().int().min(24).max(120).optional(),
+      fillColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+      strokeColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+      highlightColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+      position: z.enum(["bottom_center", "top_center", "middle_center"]).optional(),
+      maxCharsPerLine: z.coerce.number().int().min(12).max(42).optional(),
+      maxLines: z.coerce.number().int().min(1).max(4).optional()
+    })
+    .optional()
 });
 
 export const publishFacelessProjectBodySchema = z.object({
   channelId: z.string().min(1),
-  title: z.string().min(1).max(120),
+  title: z.string().min(1).max(100),
   description: z.string().max(5000).optional().default(""),
   privacyStatus: z.enum(["private", "public", "unlisted"]).default("private")
 });

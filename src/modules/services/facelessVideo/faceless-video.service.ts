@@ -6,6 +6,7 @@ import {
   type PythonWorkerClient
 } from "../../../infrastructure/pythonWorker/python-worker.client";
 import { type ProjectDocument } from "../../models/project.model";
+import { type ProjectSubtitlePreferences } from "../../models/project.model";
 import { type StoryAssetDocument, type StoryAssetType } from "../../models/story-asset.model";
 import { FacelessVideoRepository } from "../../repositories/faceless-video.repository";
 import { UploadHistoryRepository } from "../../repositories/upload-history.repository";
@@ -31,11 +32,9 @@ export interface CreateFacelessProjectInput {
 
 export interface CreateTrendingRedditProjectInput {
   userId: string;
-  title?: string;
-  description?: string;
-  subreddit?: string;
   maxDurationSeconds?: number;
   voice?: string;
+  subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
 }
 
 interface StoryStagePayload {
@@ -76,17 +75,14 @@ export class FacelessVideoService {
   }
 
   public async createTrendingRedditProject(input: CreateTrendingRedditProjectInput) {
-    const redditPost = await this.redditTrendingService.pickTrendingPost({
-      subreddit: input.subreddit
-    });
+    const redditPost = await this.redditTrendingService.pickTrendingPost({});
 
     return this.projectService.createRedditStoryProject({
       userId: input.userId,
-      title: input.title,
-      description: input.description,
       subreddit: redditPost.subreddit,
       maxDurationSeconds: input.maxDurationSeconds,
       voice: input.voice,
+      subtitlePreferences: input.subtitlePreferences,
       redditSource: {
         postId: redditPost.postId,
         permalink: redditPost.permalink,
@@ -303,8 +299,13 @@ export class FacelessVideoService {
       jobId: payload.jobId,
       projectId: payload.projectId,
       projectTitle: project.title,
+      outputBucket: this.outputBucketForProject(project),
       narration: script.narration,
-      voice: project.voice
+      voice: project.voice,
+      speakingRate:
+        project.facelessSource === "reddit_trending"
+          ? this.redditSpeakingRate(script.narration)
+          : undefined
     });
 
     const assets = await this.facelessVideoRepository.replaceAssets(payload.projectId, ["narration_audio"], [
@@ -335,8 +336,10 @@ export class FacelessVideoService {
       jobId: payload.jobId,
       projectId: payload.projectId,
       projectTitle: project.title,
+      outputBucket: this.outputBucketForProject(project),
       audioPath: audioAsset?.absolutePath,
-      scenes: this.toPythonScenes(script.scenes)
+      scenes: this.toPythonScenes(script.scenes),
+      subtitlePreferences: project.subtitlePreferences
     });
 
     const assets = await this.facelessVideoRepository.replaceAssets(
@@ -383,6 +386,7 @@ export class FacelessVideoService {
       jobId: payload.jobId,
       projectId: payload.projectId,
       projectTitle: project.title,
+      outputBucket: this.outputBucketForProject(project),
       scenes: this.toPythonScenes(script.scenes),
       visualStyle: project.stylePreset
     });
@@ -430,6 +434,7 @@ export class FacelessVideoService {
       jobId: payload.jobId,
       projectId: payload.projectId,
       projectTitle: project.title,
+      outputBucket: this.outputBucketForProject(project),
       scenes: this.toPythonScenes(script.scenes),
       imagePaths,
       audioPath: audioAsset.absolutePath,
@@ -583,6 +588,27 @@ export class FacelessVideoService {
     return value.split(/\s+/).filter(Boolean).length;
   }
 
+  private redditSpeakingRate(narration: string) {
+    const normalized = narration.toLowerCase();
+    const horrorSignals = ["terrified", "horror", "murder", "blood", "creepy", "panic", "ambulance", "overdosed"];
+    const sadSignals = ["cry", "heartbroken", "grief", "funeral", "depressed", "lonely", "regret"];
+    const dramaticSignals = ["caught", "exposed", "revenge", "affair", "fired", "wedding", "cheated"];
+
+    if (horrorSignals.some((signal) => normalized.includes(signal))) {
+      return 0.98;
+    }
+
+    if (sadSignals.some((signal) => normalized.includes(signal))) {
+      return 1.0;
+    }
+
+    if (dramaticSignals.some((signal) => normalized.includes(signal))) {
+      return 1.05;
+    }
+
+    return 1.03;
+  }
+
   private getNextStage(facelessSource: string | undefined, stage: FacelessStage): FacelessStage | undefined {
     if (facelessSource === "reddit_trending") {
       if (stage === "script") {
@@ -598,6 +624,16 @@ export class FacelessVideoService {
     }
 
     return NEXT_STAGE[stage];
+  }
+
+  private outputBucketForProject(project: Pick<ProjectDocument, "projectType" | "facelessSource">): string {
+    if (project.projectType === "uploaded_video") {
+      return "clipping";
+    }
+    if (project.facelessSource === "reddit_trending") {
+      return "reddit";
+    }
+    return "faceless_story";
   }
 
   private async getScriptOrThrow(projectId: string) {
@@ -661,19 +697,28 @@ export class FacelessVideoService {
   }
 
   private errorMessage(error: unknown): string {
-    if (error instanceof Error && error.message.trim().length > 0) {
-      return error.message;
-    }
-
     if (typeof error === "object" && error !== null) {
       const record = error as Record<string, unknown>;
       const response = record.response as { data?: unknown; status?: unknown } | undefined;
-      if (response?.data) {
-        return `Worker request failed with status ${response.status ?? "unknown"}: ${JSON.stringify(response.data)}`;
+      const responseStatus = response?.status ?? "unknown";
+      const responseData = response?.data;
+      if (typeof responseData === "object" && responseData !== null) {
+        const errorRecord = responseData as { error?: { message?: unknown; code?: unknown } };
+        if (typeof errorRecord.error?.message === "string" && errorRecord.error.message.trim().length > 0) {
+          return errorRecord.error.message;
+        }
+        return `Worker request failed with status ${responseStatus}: ${JSON.stringify(responseData)}`;
+      }
+      if (responseData !== undefined) {
+        return `Worker request failed with status ${responseStatus}: ${String(responseData)}`;
       }
       if (record.code) {
         return `Worker request failed with code ${String(record.code)}.`;
       }
+    }
+
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return error.message;
     }
 
     return "Unknown worker error.";

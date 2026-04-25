@@ -34,6 +34,7 @@ import { ClipService } from "../modules/services/clip/clip.service";
 import { FacelessVideoService } from "../modules/services/facelessVideo/faceless-video.service";
 import { JobService } from "../modules/services/job/job.service";
 import { ProjectService } from "../modules/services/project/project.service";
+import { ProjectCleanupService } from "../modules/services/project/project-cleanup.service";
 import { PublishService } from "../modules/services/publish/publish.service";
 import { QueueService } from "../modules/services/queue/queue.service";
 import { RedditTrendingService } from "../modules/services/redditStory/reddit-trending.service";
@@ -140,6 +141,19 @@ export const createApplicationContainer = async () => {
     renderService,
     publishService
   );
+  const projectCleanupService = new ProjectCleanupService(
+    projectService,
+    projectRepository,
+    clipRepository,
+    jobRepository,
+    sourceVideoRepository,
+    transcriptRepository,
+    facelessVideoRepository,
+    uploadHistoryRepository,
+    storageService,
+    configuredPythonWorkerClient,
+    queueService
+  );
 
   const reconcileUploadedVideoProjectWorkflows = async () => {
     const uploadedVideoProjects = await projectRepository.findMany({ projectType: "uploaded_video" });
@@ -225,7 +239,12 @@ export const createApplicationContainer = async () => {
       authController: new AuthController(authService),
       healthController: new HealthController(redisConnection),
       uploadController: new UploadController(uploadService),
-      projectController: new ProjectController(projectService, facelessVideoService, publishService),
+      projectController: new ProjectController(
+        projectService,
+        facelessVideoService,
+        publishService,
+        projectCleanupService
+      ),
       subtitleController: new SubtitleController(subtitleService),
       channelController: new ChannelController(channelService),
       publishController: new PublishController(publishService),
