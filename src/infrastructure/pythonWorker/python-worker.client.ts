@@ -474,6 +474,8 @@ export class PythonWorkerClient {
     backgroundMusicPath?: string;
     backgroundVideoPath?: string;
     renderMode?: "scene_images" | "background_video";
+    musicVolume?: number;
+    narrationVolume?: number;
   }): Promise<PythonFacelessRenderResponse> {
     const response = await this.client.post<PythonFacelessRenderResponse>("/internal/faceless/render", {
       job_id: input.jobId,
@@ -486,7 +488,9 @@ export class PythonWorkerClient {
       subtitles_path: input.subtitlesPath,
       background_music_path: input.backgroundMusicPath,
       background_video_path: input.backgroundVideoPath,
-      render_mode: input.renderMode ?? "scene_images"
+      render_mode: input.renderMode ?? "scene_images",
+      music_volume: input.musicVolume,
+      narration_volume: input.narrationVolume
     });
 
     return response.data;

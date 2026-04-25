@@ -439,7 +439,9 @@ export class FacelessVideoService {
       imagePaths,
       audioPath: audioAsset.absolutePath,
       subtitlesPath: subtitleAsset?.absolutePath,
-      renderMode: project.facelessSource === "reddit_trending" ? "background_video" : "scene_images"
+      renderMode: project.facelessSource === "reddit_trending" ? "background_video" : "scene_images",
+      musicVolume: project.facelessSource === "reddit_trending" ? 0.035 : undefined,
+      narrationVolume: project.facelessSource === "reddit_trending" ? 1.18 : undefined
     });
 
     const [render, assets] = await Promise.all([
@@ -595,18 +597,18 @@ export class FacelessVideoService {
     const dramaticSignals = ["caught", "exposed", "revenge", "affair", "fired", "wedding", "cheated"];
 
     if (horrorSignals.some((signal) => normalized.includes(signal))) {
-      return 0.98;
+      return 1.2;
     }
 
     if (sadSignals.some((signal) => normalized.includes(signal))) {
-      return 1.0;
+      return 1.2;
     }
 
     if (dramaticSignals.some((signal) => normalized.includes(signal))) {
-      return 1.05;
+      return 1.2;
     }
 
-    return 1.03;
+    return 1.2;
   }
 
   private getNextStage(facelessSource: string | undefined, stage: FacelessStage): FacelessStage | undefined {
