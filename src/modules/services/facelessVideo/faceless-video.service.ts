@@ -440,8 +440,8 @@ export class FacelessVideoService {
       audioPath: audioAsset.absolutePath,
       subtitlesPath: subtitleAsset?.absolutePath,
       renderMode: project.facelessSource === "reddit_trending" ? "background_video" : "scene_images",
-      musicVolume: project.facelessSource === "reddit_trending" ? 0.035 : undefined,
-      narrationVolume: project.facelessSource === "reddit_trending" ? 1.18 : undefined
+      musicVolume: project.facelessSource === "reddit_trending" ? 0.1 : undefined,
+      narrationVolume: project.facelessSource === "reddit_trending" ? 2 : undefined
     });
 
     const [render, assets] = await Promise.all([
