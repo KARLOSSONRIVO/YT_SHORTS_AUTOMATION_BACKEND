@@ -19,7 +19,13 @@ export class ChannelController {
 
   public connectChannelFromCallback = async (request: Request, response: Response): Promise<void> => {
     try {
-      await this.channelService.connectChannel(request.query.state as string, request.query.code as string);
+      if (request.query.error || !request.query.state || !request.query.code) {
+        response.redirect(302, `${env.FRONTEND_APP_URL}/channel/connected?status=error`);
+        return;
+      }
+
+      const userId = this.parseOAuthState(String(request.query.state));
+      await this.channelService.connectChannel(userId, request.query.code as string);
       response.redirect(302, `${env.FRONTEND_APP_URL}/channel/connected?status=success`);
     } catch {
       response.redirect(302, `${env.FRONTEND_APP_URL}/channel/connected?status=error`);
@@ -35,4 +41,16 @@ export class ChannelController {
     const channel = await this.channelService.disconnectChannel(getAuthenticatedUser(request).id, String(request.params.channelId));
     sendSuccess(response, channel);
   };
+
+  private parseOAuthState(rawState: string): string {
+    if (rawState.includes(":")) {
+      const [, ...userIdParts] = rawState.split(":");
+      const userId = userIdParts.join(":").trim();
+      if (userId) {
+        return userId;
+      }
+    }
+
+    return rawState;
+  }
 }

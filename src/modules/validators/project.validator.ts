@@ -21,6 +21,7 @@ export const createFacelessProjectBodySchema = z.object({
 });
 
 export const createTrendingRedditProjectBodySchema = z.object({
+  topic: z.string().trim().min(2).max(80).optional(),
   maxDurationSeconds: z.coerce.number().int().min(15).max(180).optional(),
   voice: z.string().min(1).max(80).default("af_sarah").optional(),
   subtitlePreferences: z

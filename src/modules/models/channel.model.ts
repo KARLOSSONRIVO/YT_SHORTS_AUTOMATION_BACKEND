@@ -16,7 +16,7 @@ export interface Channel {
 const channelSchema = new Schema<Channel>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    provider: { type: String, enum: ["youtube"], default: "youtube" },
+    provider: { type: String, enum: ["youtube"], default: "youtube", index: true },
     externalChannelId: { type: String, required: true, index: true },
     title: { type: String, required: true, trim: true },
     accessToken: { type: String },

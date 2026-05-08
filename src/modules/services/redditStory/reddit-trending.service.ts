@@ -38,6 +38,9 @@ export class RedditTrendingService {
   private static readonly REDDIT_BASE_URL = "https://www.reddit.com";
   private static readonly USER_AGENT = "ShortsStudio/1.0 (reddit-story-generator)";
   private static readonly REQUEST_TIMEOUT_MS = 12_000;
+  private static readonly MAX_SHORT_DURATION_SECONDS = 180;
+  private static readonly ESTIMATED_WORDS_PER_SECOND = 1.75;
+  private static readonly ESTIMATED_OVERHEAD_SECONDS = 10;
   private static readonly DEFAULT_STORY_SUBREDDITS = [
     "AskReddit",
     "tifu",
@@ -49,35 +52,28 @@ export class RedditTrendingService {
 
   constructor(private readonly projectRepository: ProjectRepository) {}
 
-  public async pickTrendingPost(input: { subreddit?: string }): Promise<TrendingRedditPost> {
+  public async pickTrendingPost(input: { subreddit?: string; topic?: string }): Promise<TrendingRedditPost> {
     const usedPostIds = await this.loadUsedPostIds();
     const usedPermalinks = await this.loadUsedPermalinks();
-    const subreddits = this.resolveSubreddits(input.subreddit);
     const candidates: TrendingRedditPost[] = [];
 
-    for (const subreddit of subreddits) {
-      let after: string | null | undefined = null;
-      for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
-        const listing = await this.fetchTrendingListing({ subreddit, after: after ?? undefined });
-        const children = listing.data?.children ?? [];
-
-        for (const child of children) {
-          const candidate = this.normalizeListingChild(child, subreddit);
-          if (!candidate) {
-            continue;
-          }
-
-          if (usedPostIds.has(candidate.postId) || usedPermalinks.has(candidate.permalink)) {
-            continue;
-          }
-
-          candidates.push(candidate);
-        }
-
-        after = listing.data?.after;
-        if (!after) {
-          break;
-        }
+    const normalizedTopic = this.normalizeTopic(input.topic);
+    if (normalizedTopic) {
+      await this.collectTopicCandidates({
+        topic: normalizedTopic,
+        usedPermalinks,
+        usedPostIds,
+        candidates
+      });
+    } else {
+      const subreddits = this.resolveSubreddits(input.subreddit);
+      for (const subreddit of subreddits) {
+        await this.collectTrendingSubredditCandidates({
+          subreddit,
+          usedPermalinks,
+          usedPostIds,
+          candidates
+        });
       }
     }
 
@@ -90,12 +86,94 @@ export class RedditTrendingService {
     }
 
     throw new AppError(
-      input.subreddit
+      normalizedTopic
+        ? `No fresh trending Reddit stories were available for topic "${normalizedTopic}".`
+        : input.subreddit
         ? `No fresh trending Reddit stories were available for r/${this.normalizeSubreddit(input.subreddit)}.`
         : "No fresh trending Reddit stories were available in the default story feed.",
       409,
       "NO_FRESH_REDDIT_STORY"
     );
+  }
+
+  private async collectTrendingSubredditCandidates(input: {
+    subreddit: string;
+    usedPostIds: Set<string>;
+    usedPermalinks: Set<string>;
+    candidates: TrendingRedditPost[];
+  }) {
+    let after: string | null | undefined = null;
+    for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
+      const listing = await this.fetchTrendingListing({ subreddit: input.subreddit, after: after ?? undefined });
+      const children = listing.data?.children ?? [];
+
+      for (const child of children) {
+        const candidate = this.normalizeListingChild(child, input.subreddit);
+        if (!candidate) {
+          continue;
+        }
+
+        if (input.usedPostIds.has(candidate.postId) || input.usedPermalinks.has(candidate.permalink)) {
+          continue;
+        }
+
+        if (this.estimatedNarrationDurationSeconds(candidate) > RedditTrendingService.MAX_SHORT_DURATION_SECONDS) {
+          continue;
+        }
+
+        input.candidates.push(candidate);
+      }
+
+      after = listing.data?.after;
+      if (!after) {
+        break;
+      }
+    }
+  }
+
+  private async collectTopicCandidates(input: {
+    topic: string;
+    usedPostIds: Set<string>;
+    usedPermalinks: Set<string>;
+    candidates: TrendingRedditPost[];
+  }) {
+    for (const subreddit of RedditTrendingService.DEFAULT_STORY_SUBREDDITS) {
+      let after: string | null | undefined = null;
+      for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
+        const listing = await this.fetchTopicListing({
+          topic: input.topic,
+          subreddit,
+          after: after ?? undefined
+        });
+        const children = listing.data?.children ?? [];
+
+        for (const child of children) {
+          const candidate = this.normalizeListingChild(child, subreddit);
+          if (!candidate) {
+            continue;
+          }
+
+          if (!this.matchesTopic(candidate, input.topic)) {
+            continue;
+          }
+
+          if (input.usedPostIds.has(candidate.postId) || input.usedPermalinks.has(candidate.permalink)) {
+            continue;
+          }
+
+          if (this.estimatedNarrationDurationSeconds(candidate) > RedditTrendingService.MAX_SHORT_DURATION_SECONDS) {
+            continue;
+          }
+
+          input.candidates.push(candidate);
+        }
+
+        after = listing.data?.after;
+        if (!after) {
+          break;
+        }
+      }
+    }
   }
 
   private normalizeSubreddit(value?: string) {
@@ -109,6 +187,11 @@ export class RedditTrendingService {
     }
 
     return [...RedditTrendingService.DEFAULT_STORY_SUBREDDITS];
+  }
+
+  private normalizeTopic(value?: string) {
+    const trimmed = (value ?? "").trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   }
 
   private async loadUsedPostIds() {
@@ -182,6 +265,52 @@ export class RedditTrendingService {
     }
   }
 
+  private async fetchTopicListing(input: { topic: string; subreddit: string; after?: string }) {
+    const url = new URL("/search.json", RedditTrendingService.REDDIT_BASE_URL);
+    url.searchParams.set("q", `${input.topic} subreddit:${input.subreddit}`);
+    url.searchParams.set("sort", "top");
+    url.searchParams.set("t", "day");
+    url.searchParams.set("type", "link");
+    url.searchParams.set("limit", "25");
+    url.searchParams.set("raw_json", "1");
+    if (input.after) {
+      url.searchParams.set("after", input.after);
+    }
+
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), RedditTrendingService.REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "User-Agent": RedditTrendingService.USER_AGENT,
+          Accept: "application/json"
+        },
+        signal: abortController.signal
+      });
+
+      if (!response.ok) {
+        throw new AppError(
+          `Reddit topic search failed with status ${response.status}.`,
+          502,
+          "REDDIT_TOPIC_SEARCH_FAILED"
+        );
+      }
+
+      return (await response.json()) as RedditListingResponse;
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : "Unknown Reddit search error.";
+      throw new AppError(message, 502, "REDDIT_TOPIC_SEARCH_FAILED");
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   private normalizeListingChild(child: RedditListingChild, fallbackSubreddit: string): TrendingRedditPost | null {
     const data = child.data;
     if (!data?.id || !data.permalink || !data.title || !data.selftext) {
@@ -221,5 +350,26 @@ export class RedditTrendingService {
       .replace(/\r/g, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+  }
+
+  private matchesTopic(candidate: TrendingRedditPost, topic: string) {
+    const haystack = `${candidate.title}\n${candidate.body}\n${candidate.subreddit}`.toLowerCase();
+    return topic
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean)
+      .every((token) => haystack.includes(token));
+  }
+
+  private estimatedNarrationDurationSeconds(candidate: Pick<TrendingRedditPost, "title" | "body">) {
+    const totalWords = this.wordCount(`${candidate.title} ${candidate.body}`);
+    return totalWords / RedditTrendingService.ESTIMATED_WORDS_PER_SECOND + RedditTrendingService.ESTIMATED_OVERHEAD_SECONDS;
+  }
+
+  private wordCount(value: string) {
+    return value
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter(Boolean).length;
   }
 }

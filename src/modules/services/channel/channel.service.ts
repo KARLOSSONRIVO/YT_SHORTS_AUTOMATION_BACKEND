@@ -3,18 +3,19 @@ import { ChannelRepository } from "../../repositories/channel.repository";
 import { YouTubeService } from "../youtube/youtube.service";
 
 export class ChannelService {
-  constructor(
-    private readonly channelRepository: ChannelRepository,
-    private readonly youTubeService: YouTubeService
-  ) {}
+  constructor(private readonly channelRepository: ChannelRepository, private readonly youTubeService: YouTubeService) {}
 
   public getConnectionUrl(userId: string) {
     return {
-      authorizationUrl: this.youTubeService.getAuthorizationUrl(userId)
+      authorizationUrl: this.youTubeService.getAuthorizationUrl(`youtube:${userId}`)
     };
   }
 
   public async connectChannel(userId: string, code: string) {
+    return this.connectYoutubeChannel(userId, code);
+  }
+
+  private async connectYoutubeChannel(userId: string, code: string) {
     const tokens = await this.youTubeService.exchangeCodeForTokens(code);
     const profile = await this.youTubeService.fetchChannelProfile(tokens);
     const channelId = profile.id;

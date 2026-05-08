@@ -32,6 +32,7 @@ export interface CreateFacelessProjectInput {
 
 export interface CreateTrendingRedditProjectInput {
   userId: string;
+  topic?: string;
   maxDurationSeconds?: number;
   voice?: string;
   subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
@@ -60,6 +61,10 @@ const NEXT_STAGE: Partial<Record<FacelessStage, FacelessStage>> = {
 };
 
 export class FacelessVideoService {
+  private static readonly MAX_REDDIT_SHORT_DURATION_SECONDS = 180;
+  private static readonly REDDIT_ESTIMATED_WORDS_PER_SECOND = 1.75;
+  private static readonly REDDIT_ESTIMATED_OVERHEAD_SECONDS = 10;
+
   constructor(
     private readonly projectService: ProjectService,
     private readonly jobService: JobService,
@@ -75,7 +80,9 @@ export class FacelessVideoService {
   }
 
   public async createTrendingRedditProject(input: CreateTrendingRedditProjectInput) {
-    const redditPost = await this.redditTrendingService.pickTrendingPost({});
+    const redditPost = await this.redditTrendingService.pickTrendingPost({
+      topic: input.topic
+    });
 
     return this.projectService.createRedditStoryProject({
       userId: input.userId,
@@ -440,7 +447,7 @@ export class FacelessVideoService {
       audioPath: audioAsset.absolutePath,
       subtitlesPath: subtitleAsset?.absolutePath,
       renderMode: project.facelessSource === "reddit_trending" ? "background_video" : "scene_images",
-      musicVolume: project.facelessSource === "reddit_trending" ? 0.1 : undefined,
+      musicVolume: project.facelessSource === "reddit_trending" ? 0.03 : undefined,
       narrationVolume: project.facelessSource === "reddit_trending" ? 2 : undefined
     });
 
@@ -487,6 +494,15 @@ export class FacelessVideoService {
     const title = project.title?.trim() || redditSource.title;
     const narration = [redditSource.title, ...sceneChunks.map((scene) => scene.narration)].join("\n\n");
     const captionText = redditSource.body;
+    const estimatedNarrationDuration = this.estimateRedditNarrationDurationSeconds(narration);
+
+    if (estimatedNarrationDuration > FacelessVideoService.MAX_REDDIT_SHORT_DURATION_SECONDS) {
+      throw new AppError(
+        "This Reddit story is too long for Shorts. Stories longer than 3 minutes are skipped.",
+        409,
+        "REDDIT_STORY_TOO_LONG"
+      );
+    }
 
     const script = await this.facelessVideoRepository.upsertScript(payload.projectId, {
       title,
@@ -520,7 +536,7 @@ export class FacelessVideoService {
     const rawParts = cleanedParagraphs.length ? cleanedParagraphs : [input.body.replace(/\s+/g, " ").trim()];
     const chunks: string[] = [];
     const maxStoryWords = input.maxDurationSeconds
-      ? Math.max(Math.round(input.maxDurationSeconds * 2.35), 70)
+      ? Math.max(Math.round(input.maxDurationSeconds * FacelessVideoService.REDDIT_ESTIMATED_WORDS_PER_SECOND), 70)
       : Number.POSITIVE_INFINITY;
     let acceptedWords = 0;
 
@@ -567,7 +583,10 @@ export class FacelessVideoService {
 
     const usableChunks = chunks.filter((chunk) => chunk.length > 0);
     const totalWords = Math.max(this.wordCount(usableChunks.join(" ")), 1);
-    const estimatedStoryDuration = Math.max(Number((totalWords / 2.35).toFixed(2)), 15);
+    const estimatedStoryDuration = Math.max(
+      Number((totalWords / FacelessVideoService.REDDIT_ESTIMATED_WORDS_PER_SECOND).toFixed(2)),
+      15
+    );
     const totalDuration = input.maxDurationSeconds
       ? Math.min(estimatedStoryDuration, input.maxDurationSeconds)
       : estimatedStoryDuration;
@@ -588,6 +607,13 @@ export class FacelessVideoService {
 
   private wordCount(value: string) {
     return value.split(/\s+/).filter(Boolean).length;
+  }
+
+  private estimateRedditNarrationDurationSeconds(narration: string) {
+    return (
+      this.wordCount(narration) / FacelessVideoService.REDDIT_ESTIMATED_WORDS_PER_SECOND +
+      FacelessVideoService.REDDIT_ESTIMATED_OVERHEAD_SECONDS
+    );
   }
 
   private redditSpeakingRate(narration: string) {
