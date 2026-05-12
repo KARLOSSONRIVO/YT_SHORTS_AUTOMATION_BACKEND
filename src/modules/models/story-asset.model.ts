@@ -6,6 +6,8 @@ export type StoryAssetType =
   | "subtitle_ass"
   | "subtitle_json"
   | "scene_image"
+  | "scene_animation"
+  | "scene_ambience"
   | "scene_clip"
   | "final_video";
 
@@ -32,6 +34,8 @@ const storyAssetSchema = new Schema<StoryAsset>(
         "subtitle_ass",
         "subtitle_json",
         "scene_image",
+        "scene_animation",
+        "scene_ambience",
         "scene_clip",
         "final_video"
       ],

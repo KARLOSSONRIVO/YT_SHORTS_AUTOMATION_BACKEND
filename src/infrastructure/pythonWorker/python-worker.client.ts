@@ -180,6 +180,37 @@ export interface PythonFacelessSceneImageResponse {
   }>;
 }
 
+export interface PythonFacelessSceneAnimationResponse {
+  job_id: string;
+  project_id: string;
+  animations: Array<{
+    scene_index: number;
+    prompt: string;
+    source_image_path: string;
+    video_path: string;
+    video_url: string;
+    cache_key: string;
+  }>;
+}
+
+export interface PythonFacelessAmbienceResponse {
+  job_id: string;
+  project_id: string;
+  ambience: Array<{
+    scene_index: number;
+    prompt: string;
+    audio_path: string;
+    audio_url?: string | null;
+    duration_seconds: number;
+    cache_key: string;
+    cached: boolean;
+    mood: string;
+    environment: string;
+    emotional_tone: string;
+    tension_level: number;
+  }>;
+}
+
 export interface PythonFacelessRenderResponse {
   job_id: string;
   project_id: string;
@@ -203,7 +234,7 @@ interface UploadRequestInput {
 export class PythonWorkerClient {
   private readonly client;
 
-  constructor(baseUrl: string, timeoutMs = 600_000) {
+  constructor(baseUrl: string, timeoutMs = 0) {
     this.client = createHttpClient(baseUrl, timeoutMs);
   }
 
@@ -349,6 +380,7 @@ export class PythonWorkerClient {
     targetDurationSeconds?: number;
     stylePreset?: string;
     audience?: string;
+    scriptFramework?: "standard_story" | "psychology_truth";
   }): Promise<PythonFacelessScriptResponse> {
     const response = await this.client.post<PythonFacelessScriptResponse>("/internal/faceless/generate-script", {
       job_id: input.jobId,
@@ -359,7 +391,8 @@ export class PythonWorkerClient {
       language: input.language,
       target_duration_seconds: input.targetDurationSeconds,
       style_preset: input.stylePreset,
-      audience: input.audience
+      audience: input.audience,
+      script_framework: input.scriptFramework
     });
 
     return response.data;
@@ -408,6 +441,7 @@ export class PythonWorkerClient {
     jobId: string;
     projectId: string;
     projectTitle?: string;
+    openingDisplayText?: string;
     outputBucket?: string;
     audioPath?: string;
     scenes: PythonFacelessScene[];
@@ -426,6 +460,7 @@ export class PythonWorkerClient {
       job_id: input.jobId,
       project_id: input.projectId,
       project_title: input.projectTitle,
+      opening_display_text: input.openingDisplayText,
       output_bucket: input.outputBucket,
       audio_path: input.audioPath,
       scenes: input.scenes,
@@ -462,6 +497,53 @@ export class PythonWorkerClient {
     return response.data;
   }
 
+  public async requestFacelessAnimations(input: {
+    jobId: string;
+    projectId: string;
+    projectTitle?: string;
+    outputBucket?: string;
+    scenes: PythonFacelessScene[];
+    images: Array<{
+      scene_index: number;
+      prompt: string;
+      image_path: string;
+      image_url: string;
+    }>;
+    animationStyle?: string;
+  }): Promise<PythonFacelessSceneAnimationResponse> {
+    const response = await this.client.post<PythonFacelessSceneAnimationResponse>("/internal/faceless/generate-animations", {
+      job_id: input.jobId,
+      project_id: input.projectId,
+      project_title: input.projectTitle,
+      output_bucket: input.outputBucket,
+      scenes: input.scenes,
+      images: input.images,
+      animation_style: input.animationStyle
+    });
+
+    return response.data;
+  }
+
+  public async requestFacelessAmbience(input: {
+    jobId: string;
+    projectId: string;
+    projectTitle?: string;
+    outputBucket?: string;
+    scenes: PythonFacelessScene[];
+    outputFormat?: "wav" | "mp3";
+  }): Promise<PythonFacelessAmbienceResponse> {
+    const response = await this.client.post<PythonFacelessAmbienceResponse>("/internal/faceless/generate-ambience", {
+      job_id: input.jobId,
+      project_id: input.projectId,
+      project_title: input.projectTitle,
+      output_bucket: input.outputBucket,
+      scenes: input.scenes,
+      output_format: input.outputFormat ?? "wav"
+    });
+
+    return response.data;
+  }
+
   public async requestFacelessRender(input: {
     jobId: string;
     projectId: string;
@@ -469,11 +551,13 @@ export class PythonWorkerClient {
     outputBucket?: string;
     scenes: PythonFacelessScene[];
     imagePaths: string[];
+    sceneVideoPaths?: string[];
     audioPath: string;
     subtitlesPath?: string;
     backgroundMusicPath?: string;
     backgroundVideoPath?: string;
-    renderMode?: "scene_images" | "background_video";
+    ambienceAudioPaths?: string[];
+    renderMode?: "scene_images" | "background_video" | "animation_story";
     musicVolume?: number;
     narrationVolume?: number;
   }): Promise<PythonFacelessRenderResponse> {
@@ -484,10 +568,12 @@ export class PythonWorkerClient {
       output_bucket: input.outputBucket,
       scenes: input.scenes,
       image_paths: input.imagePaths,
+      scene_video_paths: input.sceneVideoPaths ?? [],
       audio_path: input.audioPath,
       subtitles_path: input.subtitlesPath,
       background_music_path: input.backgroundMusicPath,
       background_video_path: input.backgroundVideoPath,
+      ambience_audio_paths: input.ambienceAudioPaths ?? [],
       render_mode: input.renderMode ?? "scene_images",
       music_volume: input.musicVolume,
       narration_volume: input.narrationVolume

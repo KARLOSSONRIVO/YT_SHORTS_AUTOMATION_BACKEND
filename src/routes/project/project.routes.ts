@@ -61,6 +61,16 @@ export const createProjectRoutes = (projectController: ProjectController): Route
     validate({ params: projectIdParamsSchema }),
     asyncHandler(projectController.generateScenes)
   );
+  router.post(
+    "/:projectId/generate-animations",
+    validate({ params: projectIdParamsSchema }),
+    asyncHandler(projectController.generateAnimations)
+  );
+  router.post(
+    "/:projectId/generate-ambience",
+    validate({ params: projectIdParamsSchema }),
+    asyncHandler(projectController.generateAmbience)
+  );
   router.post("/:projectId/render", validate({ params: projectIdParamsSchema }), asyncHandler(projectController.render));
   router.post(
     "/:projectId/publish",

@@ -15,7 +15,7 @@ import { ProjectService } from "../project/project.service";
 import { QueueService } from "../queue/queue.service";
 import { RedditTrendingService } from "../redditStory/reddit-trending.service";
 
-export type FacelessStage = "script" | "audio" | "subtitles" | "scenes" | "render";
+export type FacelessStage = "script" | "audio" | "subtitles" | "scenes" | "animations" | "ambience" | "render";
 
 export interface CreateFacelessProjectInput {
   userId: string;
@@ -25,6 +25,8 @@ export interface CreateFacelessProjectInput {
   platforms?: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
+  scriptFramework?: "standard_story" | "psychology_truth";
+  facelessRenderMode?: "image_story" | "animation_story";
   voice?: string;
   tone?: string;
   audience?: string;
@@ -50,6 +52,8 @@ const STAGE_WORKFLOW: Record<FacelessStage, { workflowStage: string; status: str
   audio: { workflowStage: "audio", status: "generating_audio" },
   subtitles: { workflowStage: "subtitles", status: "generating_subtitles" },
   scenes: { workflowStage: "scenes", status: "generating_images" },
+  animations: { workflowStage: "animations", status: "animating_scenes" },
+  ambience: { workflowStage: "ambience", status: "animating_scenes" },
   render: { workflowStage: "render", status: "rendering" }
 };
 
@@ -57,13 +61,16 @@ const NEXT_STAGE: Partial<Record<FacelessStage, FacelessStage>> = {
   script: "audio",
   audio: "subtitles",
   subtitles: "scenes",
-  scenes: "render"
+  scenes: "render",
+  animations: "ambience",
+  ambience: "render"
 };
 
 export class FacelessVideoService {
   private static readonly MAX_REDDIT_SHORT_DURATION_SECONDS = 180;
   private static readonly REDDIT_ESTIMATED_WORDS_PER_SECOND = 1.75;
   private static readonly REDDIT_ESTIMATED_OVERHEAD_SECONDS = 10;
+  private static readonly TITLE_INTRO_WORDS_PER_SECOND = 2.15;
 
   constructor(
     private readonly projectService: ProjectService,
@@ -221,6 +228,12 @@ export class FacelessVideoService {
         case "scenes":
           result = await this.processScenes(payload);
           break;
+        case "animations":
+          result = await this.processAnimations(payload);
+          break;
+        case "ambience":
+          result = await this.processAmbience(payload);
+          break;
         case "render":
           result = await this.processRender(payload);
           break;
@@ -230,7 +243,7 @@ export class FacelessVideoService {
 
       if (payload.autoRun) {
         const project = await this.projectService.getProjectOrThrow(payload.projectId);
-        const nextStage = this.getNextStage(project.facelessSource, payload.stage);
+        const nextStage = this.getNextStage(project, payload.stage);
         if (nextStage) {
           const nextJob = await this.enqueueStage(payload.projectId, nextStage, { autoRun: true });
           return { result, nextJob };
@@ -268,17 +281,29 @@ export class FacelessVideoService {
       projectId: payload.projectId,
       projectTitle: project.title,
       topic: project.topic,
+      tone: project.tone,
+      audience: project.audience,
       targetDurationSeconds: project.targetDurationSeconds,
-      stylePreset: project.stylePreset
+      stylePreset: project.stylePreset,
+      scriptFramework: project.scriptFramework
     });
+
+    const responseWithTitleIntro =
+      project.scriptFramework === "psychology_truth"
+        ? response
+        : this.prependTitleIntroToGeneratedStory({
+            title: response.title,
+            narration: response.narration,
+            scenes: response.scenes
+          });
 
     const script = await this.facelessVideoRepository.upsertScript(payload.projectId, {
       title: response.title,
       hook: response.hook,
-      narration: response.narration,
+      narration: responseWithTitleIntro.narration,
       captionText: response.caption_text,
-      imagePrompts: response.image_prompts,
-      scenes: response.scenes.map((scene) => ({
+      imagePrompts: responseWithTitleIntro.scenes.map((scene) => scene.image_prompt),
+      scenes: responseWithTitleIntro.scenes.map((scene) => ({
         sceneIndex: scene.scene_index,
         narration: scene.narration,
         imagePrompt: scene.image_prompt,
@@ -343,6 +368,10 @@ export class FacelessVideoService {
       jobId: payload.jobId,
       projectId: payload.projectId,
       projectTitle: project.title,
+      openingDisplayText:
+        project.scriptFramework === "psychology_truth"
+          ? script.hook
+          : script.title,
       outputBucket: this.outputBucketForProject(project),
       audioPath: audioAsset?.absolutePath,
       scenes: this.toPythonScenes(script.scenes),
@@ -415,11 +444,168 @@ export class FacelessVideoService {
     return assets;
   }
 
+  private async processAnimations(payload: StoryStagePayload) {
+    const [project, script, sceneImages] = await Promise.all([
+      this.projectService.getProjectOrThrow(payload.projectId),
+      this.getScriptOrThrow(payload.projectId),
+      this.facelessVideoRepository.findAssets(payload.projectId, { assetType: "scene_image" })
+    ]);
+
+    if (project.facelessSource === "reddit_trending") {
+      throw new AppError("Reddit story projects render against the provided background video and skip scene animation.", 409, "REDDIT_ANIMATIONS_NOT_REQUIRED");
+    }
+    if (project.facelessRenderMode !== "animation_story") {
+      throw new AppError("This project is configured for image story rendering.", 409, "ANIMATION_NOT_ENABLED");
+    }
+    if (sceneImages.length === 0) {
+      throw new AppError("Scene images are required before animation generation.", 409, "SCENE_IMAGES_REQUIRED");
+    }
+    const usableSceneImages = sceneImages.filter(
+      (asset) => typeof asset.absolutePath === "string" && asset.absolutePath.length > 0
+    );
+    if (usableSceneImages.length === 0) {
+      throw new AppError("Scene image files are required before animation generation.", 409, "SCENE_IMAGE_FILES_REQUIRED");
+    }
+
+    const pythonScenes = this.toPythonScenes(script.scenes);
+    const orderedSceneImages = [...usableSceneImages].sort((left, right) => (left.sceneIndex ?? 0) - (right.sceneIndex ?? 0));
+    const completedScenes: number[] = [];
+    const animations: Array<{
+      scene_index: number;
+      prompt: string;
+      source_image_path: string;
+      video_path: string;
+      video_url: string;
+      cache_key: string;
+    }> = [];
+
+    await this.updateJobProgress(payload.jobId, {
+      total: orderedSceneImages.length,
+      current: 0,
+      percent: 0,
+      completedScenes,
+      message: `Preparing ${orderedSceneImages.length} scene animation${orderedSceneImages.length === 1 ? "" : "s"}.`
+    });
+
+    for (const [index, asset] of orderedSceneImages.entries()) {
+      const sceneIndex = asset.sceneIndex ?? index + 1;
+      const matchingScene = pythonScenes.find((scene) => scene.scene_index === sceneIndex);
+
+      await this.updateJobProgress(payload.jobId, {
+        total: orderedSceneImages.length,
+        current: index,
+        percent: this.progressPercent(index, orderedSceneImages.length),
+        currentSceneIndex: sceneIndex,
+        completedScenes,
+        message: `Animating scene ${index + 1} of ${orderedSceneImages.length}.`
+      });
+
+      const response = await this.pythonWorkerClient.requestFacelessAnimations({
+        jobId: payload.jobId,
+        projectId: payload.projectId,
+        projectTitle: project.title,
+        outputBucket: this.outputBucketForProject(project),
+        scenes: matchingScene ? [matchingScene] : pythonScenes,
+        images: [
+          {
+            scene_index: sceneIndex,
+            prompt: asset.prompt ?? "",
+            image_path: asset.absolutePath ?? "",
+            image_url: asset.url ?? ""
+          }
+        ],
+        animationStyle: project.stylePreset
+      });
+
+      animations.push(...response.animations);
+      completedScenes.push(sceneIndex);
+
+      await this.updateJobProgress(payload.jobId, {
+        total: orderedSceneImages.length,
+        current: index + 1,
+        percent: this.progressPercent(index + 1, orderedSceneImages.length),
+        currentSceneIndex: sceneIndex,
+        completedScenes: [...completedScenes],
+        message: `Finished scene ${index + 1} of ${orderedSceneImages.length}.`
+      });
+    }
+
+    const assets = await this.facelessVideoRepository.replaceAssets(
+      payload.projectId,
+      ["scene_animation"],
+      animations.map((animation) => ({
+        assetType: "scene_animation",
+        sceneIndex: animation.scene_index,
+        prompt: animation.prompt,
+        absolutePath: animation.video_path,
+        url: animation.video_url,
+        mimeType: "video/mp4",
+        metadata: {
+          sourceImagePath: animation.source_image_path,
+          cacheKey: animation.cache_key
+        }
+      }))
+    );
+
+    await this.markJobCompleted(payload.jobId, {
+      assetIds: assets.map((asset) => asset.id),
+      generatedScenes: completedScenes.length,
+      totalScenes: orderedSceneImages.length
+    });
+    return assets;
+  }
+
+  private async processAmbience(payload: StoryStagePayload) {
+    const [project, script] = await Promise.all([
+      this.projectService.getProjectOrThrow(payload.projectId),
+      this.getScriptOrThrow(payload.projectId)
+    ]);
+
+    if (project.facelessRenderMode !== "animation_story") {
+      throw new AppError("AI ambience is only enabled for animation story projects.", 409, "AMBIENCE_NOT_ENABLED");
+    }
+
+    const response = await this.pythonWorkerClient.requestFacelessAmbience({
+      jobId: payload.jobId,
+      projectId: payload.projectId,
+      projectTitle: project.title,
+      outputBucket: this.outputBucketForProject(project),
+      scenes: this.toPythonScenes(script.scenes),
+      outputFormat: "wav"
+    });
+
+    const assets = await this.facelessVideoRepository.replaceAssets(
+      payload.projectId,
+      ["scene_ambience"],
+      response.ambience.map((ambience) => ({
+        assetType: "scene_ambience",
+        sceneIndex: ambience.scene_index,
+        prompt: ambience.prompt,
+        absolutePath: ambience.audio_path,
+        url: ambience.audio_url ?? undefined,
+        mimeType: "audio/wav",
+        metadata: {
+          durationSeconds: ambience.duration_seconds,
+          cacheKey: ambience.cache_key,
+          mood: ambience.mood,
+          environment: ambience.environment,
+          emotionalTone: ambience.emotional_tone,
+          tensionLevel: ambience.tension_level
+        }
+      }))
+    );
+
+    await this.markJobCompleted(payload.jobId, { assetIds: assets.map((asset) => asset.id) });
+    return assets;
+  }
+
   private async processRender(payload: StoryStagePayload) {
-    const [project, script, sceneImages, audioAsset, subtitleAsset] = await Promise.all([
+    const [project, script, sceneImages, sceneAnimations, ambienceAssets, audioAsset, subtitleAsset] = await Promise.all([
       this.projectService.getProjectOrThrow(payload.projectId),
       this.getScriptOrThrow(payload.projectId),
       this.facelessVideoRepository.findAssets(payload.projectId, { assetType: "scene_image" }),
+      this.facelessVideoRepository.findAssets(payload.projectId, { assetType: "scene_animation" }),
+      this.facelessVideoRepository.findAssets(payload.projectId, { assetType: "scene_ambience" }),
       this.getAssetOrThrow(payload.projectId, "narration_audio"),
       this.facelessVideoRepository.findLatestAssetByType(payload.projectId, "subtitle_ass")
     ]);
@@ -427,9 +613,18 @@ export class FacelessVideoService {
     const imagePaths = sceneImages
       .map((asset) => asset.absolutePath)
       .filter((assetPath): assetPath is string => typeof assetPath === "string" && assetPath.length > 0);
+    const animationPaths = sceneAnimations
+      .map((asset) => asset.absolutePath)
+      .filter((assetPath): assetPath is string => typeof assetPath === "string" && assetPath.length > 0);
+    const ambiencePaths = ambienceAssets
+      .map((asset) => asset.absolutePath)
+      .filter((assetPath): assetPath is string => typeof assetPath === "string" && assetPath.length > 0);
 
     if (project.facelessSource !== "reddit_trending" && imagePaths.length === 0) {
       throw new AppError("Scene images are required before rendering.", 409, "SCENE_IMAGES_REQUIRED");
+    }
+    if (project.facelessRenderMode === "animation_story" && animationPaths.length === 0) {
+      throw new AppError("Scene animations are required before rendering an animation story.", 409, "SCENE_ANIMATIONS_REQUIRED");
     }
     if (!audioAsset.absolutePath) {
       throw new AppError("Narration audio is required before rendering.", 409, "AUDIO_REQUIRED");
@@ -444,9 +639,11 @@ export class FacelessVideoService {
       outputBucket: this.outputBucketForProject(project),
       scenes: this.toPythonScenes(script.scenes),
       imagePaths,
+      sceneVideoPaths: animationPaths,
       audioPath: audioAsset.absolutePath,
       subtitlesPath: subtitleAsset?.absolutePath,
-      renderMode: project.facelessSource === "reddit_trending" ? "background_video" : "scene_images",
+      ambienceAudioPaths: project.facelessRenderMode === "animation_story" ? ambiencePaths : [],
+      renderMode: project.facelessSource === "reddit_trending" ? "background_video" : project.facelessRenderMode === "animation_story" ? "animation_story" : "scene_images",
       musicVolume: project.facelessSource === "reddit_trending" ? 0.03 : undefined,
       narrationVolume: project.facelessSource === "reddit_trending" ? 2 : undefined
     });
@@ -609,6 +806,63 @@ export class FacelessVideoService {
     return value.split(/\s+/).filter(Boolean).length;
   }
 
+  private prependTitleIntroToGeneratedStory(input: {
+    title: string;
+    narration: string;
+    scenes: PythonFacelessScene[];
+  }) {
+    const normalizedTitle = this.normalizeLeadText(input.title);
+    const normalizedNarrationLead = this.normalizeLeadText(input.narration.slice(0, Math.max(input.title.length + 40, 120)));
+    if (!normalizedTitle || normalizedNarrationLead.startsWith(normalizedTitle) || input.scenes.length === 0) {
+      return input;
+    }
+
+    const firstScene = input.scenes[0];
+    const introDuration = this.titleIntroDurationSeconds(input.title);
+    const introPrompt = this.titleIntroImagePrompt(input.title, firstScene.image_prompt);
+    const introScene: PythonFacelessScene = {
+      scene_index: 1,
+      narration: input.title,
+      image_prompt: introPrompt,
+      duration_seconds: introDuration,
+      caption_text: input.title,
+    };
+
+    const shiftedScenes = input.scenes.map((scene, index) => ({
+      ...scene,
+      scene_index: index + 2,
+    }));
+
+    return {
+      ...input,
+      narration: `${input.title}\n\n${input.narration}`.trim(),
+      scenes: [introScene, ...shiftedScenes],
+    };
+  }
+
+  private normalizeLeadText(value: string) {
+    return value
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  private titleIntroDurationSeconds(title: string) {
+    const estimated = this.wordCount(title) / FacelessVideoService.TITLE_INTRO_WORDS_PER_SECOND + 0.8;
+    return Number(Math.min(Math.max(estimated, 2.5), 5.5).toFixed(2));
+  }
+
+  private titleIntroImagePrompt(title: string, fallbackPrompt: string) {
+    return [
+      `cinematic opening frame that visually introduces: ${title}`,
+      "single strong establishing image, one clear subject, dramatic but believable scene",
+      fallbackPrompt,
+    ]
+      .filter(Boolean)
+      .join(", ");
+  }
+
   private estimateRedditNarrationDurationSeconds(narration: string) {
     return (
       this.wordCount(narration) / FacelessVideoService.REDDIT_ESTIMATED_WORDS_PER_SECOND +
@@ -637,8 +891,11 @@ export class FacelessVideoService {
     return 1.2;
   }
 
-  private getNextStage(facelessSource: string | undefined, stage: FacelessStage): FacelessStage | undefined {
-    if (facelessSource === "reddit_trending") {
+  private getNextStage(
+    project: Pick<ProjectDocument, "facelessSource" | "facelessRenderMode">,
+    stage: FacelessStage
+  ): FacelessStage | undefined {
+    if (project.facelessSource === "reddit_trending") {
       if (stage === "script") {
         return "audio";
       }
@@ -649,6 +906,10 @@ export class FacelessVideoService {
         return "render";
       }
       return undefined;
+    }
+
+    if (stage === "scenes" && project.facelessRenderMode === "animation_story") {
+      return "animations";
     }
 
     return NEXT_STAGE[stage];
@@ -713,6 +974,28 @@ export class FacelessVideoService {
       completedAt: new Date(),
       result
     });
+  }
+
+  private async updateJobProgress(
+    jobId: string,
+    progress: {
+      total?: number;
+      current?: number;
+      percent?: number;
+      message?: string;
+      currentSceneIndex?: number;
+      completedScenes?: number[];
+    }
+  ) {
+    await this.jobService.updateJob(jobId, { progress });
+  }
+
+  private progressPercent(current: number, total: number) {
+    if (total <= 0) {
+      return 0;
+    }
+
+    return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
   }
 
   private async markJobFailed(jobId: string, error: unknown) {

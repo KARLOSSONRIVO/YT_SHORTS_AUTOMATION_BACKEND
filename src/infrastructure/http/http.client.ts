@@ -1,6 +1,6 @@
 import axios from "axios";
 
-export const createHttpClient = (baseURL?: string, timeout = 30_000) => {
+export const createHttpClient = (baseURL?: string, timeout = 0) => {
   return axios.create({
     baseURL,
     timeout

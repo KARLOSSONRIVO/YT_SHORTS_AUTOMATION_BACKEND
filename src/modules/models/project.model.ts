@@ -45,7 +45,11 @@ export interface Project {
   platforms: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
+  scriptFramework?: "standard_story" | "psychology_truth";
+  facelessRenderMode?: "image_story" | "animation_story";
   voice?: string;
+  tone?: string;
+  audience?: string;
   redditSource?: RedditSourceMetadata;
   status:
     | "draft"
@@ -70,6 +74,8 @@ export interface Project {
     | "audio"
     | "subtitles"
     | "scenes"
+    | "animations"
+    | "ambience"
     | "render"
     | "review"
     | "publish"
@@ -135,7 +141,19 @@ const projectSchema = new Schema<Project>(
     },
     targetDurationSeconds: { type: Number },
     stylePreset: { type: String, trim: true },
+    scriptFramework: {
+      type: String,
+      enum: ["standard_story", "psychology_truth"],
+      default: "standard_story"
+    },
+    facelessRenderMode: {
+      type: String,
+      enum: ["image_story", "animation_story"],
+      default: "image_story"
+    },
     voice: { type: String, trim: true },
+    tone: { type: String, trim: true },
+    audience: { type: String, trim: true },
     redditSource: { type: redditSourceMetadataSchema },
     status: {
       type: String,
@@ -168,6 +186,8 @@ const projectSchema = new Schema<Project>(
         "audio",
         "subtitles",
         "scenes",
+        "animations",
+        "ambience",
         "render",
         "review",
         "publish",

@@ -10,6 +10,14 @@ export interface Job {
   attempts: number;
   externalJobId?: string;
   payload: Record<string, unknown>;
+  progress?: {
+    total?: number;
+    current?: number;
+    percent?: number;
+    message?: string;
+    currentSceneIndex?: number;
+    completedScenes?: number[];
+  };
   result?: Record<string, unknown>;
   errorMessage?: string;
   startedAt?: Date;
@@ -26,6 +34,7 @@ const jobSchema = new Schema<Job>(
     attempts: { type: Number, default: 0 },
     externalJobId: { type: String },
     payload: { type: Schema.Types.Mixed, required: true },
+    progress: { type: Schema.Types.Mixed },
     result: { type: Schema.Types.Mixed },
     errorMessage: { type: String },
     startedAt: { type: Date },

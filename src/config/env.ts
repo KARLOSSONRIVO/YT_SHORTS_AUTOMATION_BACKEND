@@ -11,7 +11,7 @@ const envSchema = z.object({
   MONGODB_URI: z.string().min(1),
   REDIS_URL: z.string().min(1),
   PYTHON_WORKER_BASE_URL: z.string().url(),
-  PYTHON_WORKER_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
+  PYTHON_WORKER_TIMEOUT_MS: z.coerce.number().int().nonnegative().default(0),
   YOUTUBE_CLIENT_ID: z.string().min(1),
   YOUTUBE_CLIENT_SECRET: z.string().min(1),
   YOUTUBE_REDIRECT_URI: z.string().url(),

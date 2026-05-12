@@ -14,6 +14,7 @@ services:
       MONGODB_URI: mongodb://mongo:27017/youtube_shorts_automation
       REDIS_URL: redis://redis:6379
       PYTHON_WORKER_BASE_URL: http://host.docker.internal:8000
+      PYTHON_WORKER_TIMEOUT_MS: ${PYTHON_WORKER_TIMEOUT_MS:-0}
       STORAGE_ROOT: /app/storage
       TEMP_UPLOAD_DIR: /app/storage/tmp
       MAX_FILE_SIZE_BYTES: ${MAX_FILE_SIZE_BYTES:-1073741824}
@@ -50,6 +51,7 @@ services:
       MONGODB_URI: mongodb://mongo:27017/youtube_shorts_automation
       REDIS_URL: redis://redis:6379
       PYTHON_WORKER_BASE_URL: http://host.docker.internal:8000
+      PYTHON_WORKER_TIMEOUT_MS: ${PYTHON_WORKER_TIMEOUT_MS:-0}
       STORAGE_ROOT: /app/storage
       TEMP_UPLOAD_DIR: /app/storage/tmp
       MAX_FILE_SIZE_BYTES: ${MAX_FILE_SIZE_BYTES:-1073741824}

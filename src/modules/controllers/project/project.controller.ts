@@ -90,6 +90,14 @@ export class ProjectController {
     await this.enqueueFacelessStage(request, response, "scenes");
   };
 
+  public generateAnimations = async (request: Request, response: Response): Promise<void> => {
+    await this.enqueueFacelessStage(request, response, "animations");
+  };
+
+  public generateAmbience = async (request: Request, response: Response): Promise<void> => {
+    await this.enqueueFacelessStage(request, response, "ambience");
+  };
+
   public render = async (request: Request, response: Response): Promise<void> => {
     await this.enqueueFacelessStage(request, response, "render");
   };
