@@ -23,7 +23,7 @@ export interface CreateFacelessStoryProjectInput {
   platforms?: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
-  scriptFramework?: "standard_story" | "psychology_truth";
+  scriptFramework?: "psychology_truth" | "history_story";
   facelessRenderMode?: "image_story" | "animation_story";
   voice?: string;
   tone?: string;
@@ -74,7 +74,7 @@ export class ProjectService {
       platforms: input.platforms ?? ["youtube"],
       targetDurationSeconds: input.targetDurationSeconds ?? 45,
       stylePreset: input.stylePreset ?? "cinematic documentary",
-      scriptFramework: input.scriptFramework ?? "standard_story",
+      scriptFramework: input.scriptFramework ?? "psychology_truth",
       facelessRenderMode: input.facelessRenderMode ?? "image_story",
       voice: input.voice ?? "af_sarah",
       tone: input.tone,

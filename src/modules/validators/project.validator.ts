@@ -15,7 +15,7 @@ export const createFacelessProjectBodySchema = z.object({
   platforms: z.array(z.enum(["youtube", "tiktok"])).min(1).default(["youtube"]).optional(),
   targetDurationSeconds: z.coerce.number().int().min(15).max(180).default(45).optional(),
   stylePreset: z.string().min(1).max(160).default("cinematic documentary").optional(),
-  scriptFramework: z.enum(["standard_story", "psychology_truth"]).default("standard_story").optional(),
+  scriptFramework: z.enum(["psychology_truth", "history_story"]).default("psychology_truth").optional(),
   facelessRenderMode: z.enum(["image_story", "animation_story"]).default("image_story").optional(),
   voice: z.string().min(1).max(80).default("af_sarah").optional(),
   tone: z.string().min(1).max(80).optional(),

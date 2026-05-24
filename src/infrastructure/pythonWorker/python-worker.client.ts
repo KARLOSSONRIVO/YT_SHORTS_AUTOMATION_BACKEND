@@ -380,7 +380,7 @@ export class PythonWorkerClient {
     targetDurationSeconds?: number;
     stylePreset?: string;
     audience?: string;
-    scriptFramework?: "standard_story" | "psychology_truth";
+    scriptFramework?: "psychology_truth" | "history_story";
   }): Promise<PythonFacelessScriptResponse> {
     const response = await this.client.post<PythonFacelessScriptResponse>("/internal/faceless/generate-script", {
       job_id: input.jobId,

@@ -25,7 +25,7 @@ export interface CreateFacelessProjectInput {
   platforms?: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
-  scriptFramework?: "standard_story" | "psychology_truth";
+  scriptFramework?: "psychology_truth" | "history_story";
   facelessRenderMode?: "image_story" | "animation_story";
   voice?: string;
   tone?: string;
@@ -70,7 +70,6 @@ export class FacelessVideoService {
   private static readonly MAX_REDDIT_SHORT_DURATION_SECONDS = 180;
   private static readonly REDDIT_ESTIMATED_WORDS_PER_SECOND = 1.75;
   private static readonly REDDIT_ESTIMATED_OVERHEAD_SECONDS = 10;
-  private static readonly TITLE_INTRO_WORDS_PER_SECOND = 2.15;
 
   constructor(
     private readonly projectService: ProjectService,
@@ -285,25 +284,16 @@ export class FacelessVideoService {
       audience: project.audience,
       targetDurationSeconds: project.targetDurationSeconds,
       stylePreset: project.stylePreset,
-      scriptFramework: project.scriptFramework
+      scriptFramework: this.effectiveScriptFramework(project)
     });
-
-    const responseWithTitleIntro =
-      project.scriptFramework === "psychology_truth"
-        ? response
-        : this.prependTitleIntroToGeneratedStory({
-            title: response.title,
-            narration: response.narration,
-            scenes: response.scenes
-          });
 
     const script = await this.facelessVideoRepository.upsertScript(payload.projectId, {
       title: response.title,
       hook: response.hook,
-      narration: responseWithTitleIntro.narration,
+      narration: response.narration,
       captionText: response.caption_text,
-      imagePrompts: responseWithTitleIntro.scenes.map((scene) => scene.image_prompt),
-      scenes: responseWithTitleIntro.scenes.map((scene) => ({
+      imagePrompts: response.scenes.map((scene) => scene.image_prompt),
+      scenes: response.scenes.map((scene) => ({
         sceneIndex: scene.scene_index,
         narration: scene.narration,
         imagePrompt: scene.image_prompt,
@@ -332,7 +322,7 @@ export class FacelessVideoService {
       projectId: payload.projectId,
       projectTitle: project.title,
       outputBucket: this.outputBucketForProject(project),
-      narration: script.narration,
+      narration: this.narrationWithOpeningPause(script),
       voice: project.voice,
       speakingRate:
         project.facelessSource === "reddit_trending"
@@ -368,10 +358,7 @@ export class FacelessVideoService {
       jobId: payload.jobId,
       projectId: payload.projectId,
       projectTitle: project.title,
-      openingDisplayText:
-        project.scriptFramework === "psychology_truth"
-          ? script.hook
-          : script.title,
+      openingDisplayText: script.hook,
       outputBucket: this.outputBucketForProject(project),
       audioPath: audioAsset?.absolutePath,
       scenes: this.toPythonScenes(script.scenes),
@@ -806,63 +793,6 @@ export class FacelessVideoService {
     return value.split(/\s+/).filter(Boolean).length;
   }
 
-  private prependTitleIntroToGeneratedStory(input: {
-    title: string;
-    narration: string;
-    scenes: PythonFacelessScene[];
-  }) {
-    const normalizedTitle = this.normalizeLeadText(input.title);
-    const normalizedNarrationLead = this.normalizeLeadText(input.narration.slice(0, Math.max(input.title.length + 40, 120)));
-    if (!normalizedTitle || normalizedNarrationLead.startsWith(normalizedTitle) || input.scenes.length === 0) {
-      return input;
-    }
-
-    const firstScene = input.scenes[0];
-    const introDuration = this.titleIntroDurationSeconds(input.title);
-    const introPrompt = this.titleIntroImagePrompt(input.title, firstScene.image_prompt);
-    const introScene: PythonFacelessScene = {
-      scene_index: 1,
-      narration: input.title,
-      image_prompt: introPrompt,
-      duration_seconds: introDuration,
-      caption_text: input.title,
-    };
-
-    const shiftedScenes = input.scenes.map((scene, index) => ({
-      ...scene,
-      scene_index: index + 2,
-    }));
-
-    return {
-      ...input,
-      narration: `${input.title}\n\n${input.narration}`.trim(),
-      scenes: [introScene, ...shiftedScenes],
-    };
-  }
-
-  private normalizeLeadText(value: string) {
-    return value
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  private titleIntroDurationSeconds(title: string) {
-    const estimated = this.wordCount(title) / FacelessVideoService.TITLE_INTRO_WORDS_PER_SECOND + 0.8;
-    return Number(Math.min(Math.max(estimated, 2.5), 5.5).toFixed(2));
-  }
-
-  private titleIntroImagePrompt(title: string, fallbackPrompt: string) {
-    return [
-      `cinematic opening frame that visually introduces: ${title}`,
-      "single strong establishing image, one clear subject, dramatic but believable scene",
-      fallbackPrompt,
-    ]
-      .filter(Boolean)
-      .join(", ");
-  }
-
   private estimateRedditNarrationDurationSeconds(narration: string) {
     return (
       this.wordCount(narration) / FacelessVideoService.REDDIT_ESTIMATED_WORDS_PER_SECOND +
@@ -891,6 +821,61 @@ export class FacelessVideoService {
     return 1.2;
   }
 
+  private narrationWithOpeningPause(
+    script: { title: string; hook: string; narration: string }
+  ) {
+    const narration = script.narration.trim();
+    if (!narration) {
+      return narration;
+    }
+
+    const openingCandidates = [script.hook, script.title];
+
+    for (const openingCandidate of openingCandidates) {
+      const withPause = this.insertPauseAfterOpeningText(narration, openingCandidate);
+      if (withPause) {
+        return withPause;
+      }
+    }
+
+    const preferredOpening = script.hook.trim() || script.title.trim();
+    if (preferredOpening) {
+      return `${preferredOpening}\n\n${narration}`;
+    }
+
+    return this.insertPauseAfterFirstSentence(narration) ?? narration;
+  }
+
+  private insertPauseAfterOpeningText(narration: string, openingCandidate?: string) {
+    const opening = openingCandidate?.trim();
+    if (!opening) {
+      return undefined;
+    }
+
+    const lowerNarration = narration.toLowerCase();
+    const lowerOpening = opening.toLowerCase();
+    if (!lowerNarration.startsWith(lowerOpening)) {
+      return undefined;
+    }
+
+    const beforePause = narration.slice(0, opening.length).trim();
+    const afterPause = narration.slice(opening.length).trim();
+    if (!beforePause || !afterPause) {
+      return undefined;
+    }
+
+    return `${beforePause}\n\n${afterPause}`;
+  }
+
+  private insertPauseAfterFirstSentence(narration: string) {
+    const match = narration.match(/^(.+?[.!?])\s+(.+)$/s);
+    if (!match?.[1] || !match[2]) {
+      return undefined;
+    }
+
+    return `${match[1].trim()}\n\n${match[2].trim()}`;
+  }
+
   private getNextStage(
     project: Pick<ProjectDocument, "facelessSource" | "facelessRenderMode">,
     stage: FacelessStage
@@ -913,6 +898,16 @@ export class FacelessVideoService {
     }
 
     return NEXT_STAGE[stage];
+  }
+
+  private effectiveScriptFramework(
+    project: Pick<ProjectDocument, "facelessSource" | "scriptFramework">
+  ): "psychology_truth" | "history_story" {
+    if (project.facelessSource === "reddit_trending") {
+      return "psychology_truth";
+    }
+
+    return project.scriptFramework ?? "psychology_truth";
   }
 
   private outputBucketForProject(project: Pick<ProjectDocument, "projectType" | "facelessSource">): string {
