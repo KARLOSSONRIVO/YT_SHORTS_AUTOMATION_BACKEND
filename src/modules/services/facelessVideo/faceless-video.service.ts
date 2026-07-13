@@ -432,10 +432,9 @@ export class FacelessVideoService {
   }
 
   private async processAnimations(payload: StoryStagePayload) {
-    const [project, script, sceneImages] = await Promise.all([
+    const [project, script] = await Promise.all([
       this.projectService.getProjectOrThrow(payload.projectId),
-      this.getScriptOrThrow(payload.projectId),
-      this.facelessVideoRepository.findAssets(payload.projectId, { assetType: "scene_image" })
+      this.getScriptOrThrow(payload.projectId)
     ]);
 
     if (project.facelessSource === "reddit_trending") {
@@ -444,18 +443,8 @@ export class FacelessVideoService {
     if (project.facelessRenderMode !== "animation_story") {
       throw new AppError("This project is configured for image story rendering.", 409, "ANIMATION_NOT_ENABLED");
     }
-    if (sceneImages.length === 0) {
-      throw new AppError("Scene images are required before animation generation.", 409, "SCENE_IMAGES_REQUIRED");
-    }
-    const usableSceneImages = sceneImages.filter(
-      (asset) => typeof asset.absolutePath === "string" && asset.absolutePath.length > 0
-    );
-    if (usableSceneImages.length === 0) {
-      throw new AppError("Scene image files are required before animation generation.", 409, "SCENE_IMAGE_FILES_REQUIRED");
-    }
 
     const pythonScenes = this.toPythonScenes(script.scenes);
-    const orderedSceneImages = [...usableSceneImages].sort((left, right) => (left.sceneIndex ?? 0) - (right.sceneIndex ?? 0));
     const completedScenes: number[] = [];
     const animations: Array<{
       scene_index: number;
@@ -467,24 +456,23 @@ export class FacelessVideoService {
     }> = [];
 
     await this.updateJobProgress(payload.jobId, {
-      total: orderedSceneImages.length,
+      total: pythonScenes.length,
       current: 0,
       percent: 0,
       completedScenes,
-      message: `Preparing ${orderedSceneImages.length} scene animation${orderedSceneImages.length === 1 ? "" : "s"}.`
+      message: `Preparing ${pythonScenes.length} text-to-video scene animation${pythonScenes.length === 1 ? "" : "s"}.`
     });
 
-    for (const [index, asset] of orderedSceneImages.entries()) {
-      const sceneIndex = asset.sceneIndex ?? index + 1;
-      const matchingScene = pythonScenes.find((scene) => scene.scene_index === sceneIndex);
+    for (const [index, scene] of pythonScenes.entries()) {
+      const sceneIndex = scene.scene_index;
 
       await this.updateJobProgress(payload.jobId, {
-        total: orderedSceneImages.length,
+        total: pythonScenes.length,
         current: index,
-        percent: this.progressPercent(index, orderedSceneImages.length),
+        percent: this.progressPercent(index, pythonScenes.length),
         currentSceneIndex: sceneIndex,
         completedScenes,
-        message: `Animating scene ${index + 1} of ${orderedSceneImages.length}.`
+        message: `Generating text-to-video scene ${index + 1} of ${pythonScenes.length}.`
       });
 
       const response = await this.pythonWorkerClient.requestFacelessAnimations({
@@ -492,15 +480,7 @@ export class FacelessVideoService {
         projectId: payload.projectId,
         projectTitle: project.title,
         outputBucket: this.outputBucketForProject(project),
-        scenes: matchingScene ? [matchingScene] : pythonScenes,
-        images: [
-          {
-            scene_index: sceneIndex,
-            prompt: asset.prompt ?? "",
-            image_path: asset.absolutePath ?? "",
-            image_url: asset.url ?? ""
-          }
-        ],
+        scenes: [scene],
         animationStyle: project.stylePreset
       });
 
@@ -508,12 +488,12 @@ export class FacelessVideoService {
       completedScenes.push(sceneIndex);
 
       await this.updateJobProgress(payload.jobId, {
-        total: orderedSceneImages.length,
+        total: pythonScenes.length,
         current: index + 1,
-        percent: this.progressPercent(index + 1, orderedSceneImages.length),
+        percent: this.progressPercent(index + 1, pythonScenes.length),
         currentSceneIndex: sceneIndex,
         completedScenes: [...completedScenes],
-        message: `Finished scene ${index + 1} of ${orderedSceneImages.length}.`
+        message: `Finished text-to-video scene ${index + 1} of ${pythonScenes.length}.`
       });
     }
 
@@ -537,7 +517,7 @@ export class FacelessVideoService {
     await this.markJobCompleted(payload.jobId, {
       assetIds: assets.map((asset) => asset.id),
       generatedScenes: completedScenes.length,
-      totalScenes: orderedSceneImages.length
+      totalScenes: pythonScenes.length
     });
     return assets;
   }
@@ -607,7 +587,7 @@ export class FacelessVideoService {
       .map((asset) => asset.absolutePath)
       .filter((assetPath): assetPath is string => typeof assetPath === "string" && assetPath.length > 0);
 
-    if (project.facelessSource !== "reddit_trending" && imagePaths.length === 0) {
+    if (project.facelessSource !== "reddit_trending" && project.facelessRenderMode !== "animation_story" && imagePaths.length === 0) {
       throw new AppError("Scene images are required before rendering.", 409, "SCENE_IMAGES_REQUIRED");
     }
     if (project.facelessRenderMode === "animation_story" && animationPaths.length === 0) {
@@ -894,6 +874,9 @@ export class FacelessVideoService {
     }
 
     if (stage === "scenes" && project.facelessRenderMode === "animation_story") {
+      return "animations";
+    }
+    if (stage === "subtitles" && project.facelessRenderMode === "animation_story") {
       return "animations";
     }
 

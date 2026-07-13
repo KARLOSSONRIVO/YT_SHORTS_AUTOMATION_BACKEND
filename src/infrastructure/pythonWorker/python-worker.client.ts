@@ -503,7 +503,7 @@ export class PythonWorkerClient {
     projectTitle?: string;
     outputBucket?: string;
     scenes: PythonFacelessScene[];
-    images: Array<{
+    images?: Array<{
       scene_index: number;
       prompt: string;
       image_path: string;
@@ -517,7 +517,7 @@ export class PythonWorkerClient {
       project_title: input.projectTitle,
       output_bucket: input.outputBucket,
       scenes: input.scenes,
-      images: input.images,
+      images: input.images ?? [],
       animation_style: input.animationStyle
     });
 
