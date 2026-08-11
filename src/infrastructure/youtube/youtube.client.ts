@@ -95,6 +95,10 @@ export class YouTubeClient {
     description: string;
     privacyStatus: "private" | "public" | "unlisted";
     videoPath: string;
+    madeForKids?: boolean;
+    thumbnailPath?: string;
+    subtitlePath?: string;
+    subtitleLanguage?: string;
   }): Promise<youtube_v3.Schema$Video> {
     this.oauthClient.setCredentials(this.toCredentials(input.tokens));
     const youtube = google.youtube({ version: "v3", auth: this.oauthClient });
@@ -113,7 +117,8 @@ export class YouTubeClient {
                 categoryId: "22"
               },
               status: {
-                privacyStatus: input.privacyStatus
+                privacyStatus: input.privacyStatus,
+                selfDeclaredMadeForKids: input.madeForKids
               }
             },
             media: {
@@ -129,6 +134,15 @@ export class YouTubeClient {
           throw new Error("YouTube upload completed without a response payload.");
         }
 
+        if (response.data.id && input.thumbnailPath) {
+          await youtube.thumbnails.set({ videoId: response.data.id, media: { body: fs.createReadStream(input.thumbnailPath) } });
+        }
+        if (response.data.id && input.subtitlePath) {
+          await youtube.captions.insert({
+            part: ["snippet"], requestBody: { snippet: { videoId: response.data.id, language: input.subtitleLanguage ?? "en", name: "Uploaded subtitles", isDraft: false } },
+            media: { body: fs.createReadStream(input.subtitlePath) }
+          });
+        }
         return response.data;
       } catch (error) {
         lastError = error;

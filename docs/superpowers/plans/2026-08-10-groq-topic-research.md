@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace backend Gemini topic research and embeddings with Groq Compound web research plus local deterministic embeddings.
+**Goal:** Replace backend Gemini topic research and embeddings with Groq Compound Mini web research plus local deterministic embeddings.
 
-**Architecture:** `TopicResearchService` remains a backend-owned service but changes to Groq's OpenAI-compatible `/chat/completions` contract using `groq/compound`, JSON object mode, and built-in web tools. Candidate parsing and quality gates remain in place, while `DuplicateDetector.embedding()` replaces Gemini Embeddings and provider retry naming becomes generic.
+**Architecture:** `TopicResearchService` remains a backend-owned service but changes to Groq's OpenAI-compatible `/chat/completions` contract using `groq/compound-mini`, JSON object mode, and built-in web search. Candidate parsing accepts both the requested object and Compound Mini's observed fenced-array response while preserving quality gates. `DuplicateDetector.embedding()` replaces Gemini Embeddings and provider retry naming becomes generic.
 
 **Tech Stack:** TypeScript 5.8, Node.js test runner, Axios, Zod, BullMQ, Groq Compound API, Docker Compose
 
@@ -13,7 +13,7 @@
 - Gemini remains unchanged in the Python worker for image generation and TTS.
 - AI animation provider routing is outside this migration.
 - Topic research must retain live web research and at least two source URLs per accepted candidate.
-- `GROQ_TOPIC_RESEARCH_MODEL` defaults to exactly `groq/compound`.
+- `GROQ_TOPIC_RESEARCH_MODEL` defaults to exactly `groq/compound-mini` because live requests to full Compound returned HTTP 413 for this Groq project.
 - `GROQ_API_BASE_URL` defaults to exactly `https://api.groq.com/openai/v1`.
 - Provider retry delays remain exactly 30, 60, then 120 seconds, capped at 120 seconds.
 - Never print API keys or include them in tests, snapshots, diffs, or logs.
@@ -21,7 +21,7 @@
 
 ## File Map
 
-- `src/modules/automation/topic-research.service.ts`: Groq Compound request, response parsing, local embeddings, and Groq errors.
+- `src/modules/automation/topic-research.service.ts`: Groq Compound Mini request, response parsing, local embeddings, and Groq errors.
 - `src/modules/automation/retry-policy.ts`: provider-neutral retry-delay export.
 - `src/modules/automation/automation.service.ts`: provider-neutral BullMQ backoff name and activity message.
 - `src/worker.ts`: provider-neutral BullMQ backoff strategy registration.
@@ -60,7 +60,7 @@ test("Groq 429 responses become actionable retryable errors", async () => {
     };
   });
   try {
-    const service = new TopicResearchService("test-key", "groq/compound", "https://api.groq.test/openai/v1");
+    const service = new TopicResearchService("test-key", "groq/compound-mini", "https://api.groq.test/openai/v1");
     await assert.rejects(
       () => service.generate({ profile, language: "en", region: "US", recentTopics: [], recentEntities: [] }),
       error => error instanceof AppError && error.code === "GROQ_RATE_LIMITED" && error.message.includes("Automatic retries")
@@ -70,7 +70,7 @@ test("Groq 429 responses become actionable retryable errors", async () => {
   }
 });
 
-test("topic research uses Groq Compound web tools and local embeddings", async () => {
+test("topic research accepts Compound Mini's loosely fenced array and adds local embeddings", async () => {
   const candidates = [0, 1, 2].map(index => ({ ...candidate, topic: `Topic ${index}`, title: `Title ${index}` }));
   const post = mock.method(axios, "post", async (url: string, body: unknown, config: { headers?: Record<string, string> }) => {
     const request = body as {
@@ -79,15 +79,15 @@ test("topic research uses Groq Compound web tools and local embeddings", async (
       compound_custom: { tools: { enabled_tools: string[] } };
     };
     assert.equal(url, "https://api.groq.test/openai/v1/chat/completions");
-    assert.equal(request.model, "groq/compound");
+    assert.equal(request.model, "groq/compound-mini");
     assert.deepEqual(request.response_format, { type: "json_object" });
-    assert.deepEqual(request.compound_custom.tools.enabled_tools, ["web_search", "visit_website"]);
+    assert.deepEqual(request.compound_custom.tools.enabled_tools, ["web_search"]);
     assert.equal(config.headers?.Authorization, "Bearer test-key");
     assert.equal(config.headers?.["Groq-Model-Version"], "latest");
     return { data: { choices: [{ message: { content: JSON.stringify({ candidates }) } }] } };
   });
   try {
-    const service = new TopicResearchService("test-key", "groq/compound", "https://api.groq.test/openai/v1/");
+    const service = new TopicResearchService("test-key", "groq/compound-mini", "https://api.groq.test/openai/v1/");
     const result = await service.generate({ profile, language: "en", region: "US", recentTopics: [], recentEntities: [] });
     assert.equal(result.length, 3);
     assert.equal(result[0].embedding?.length, 96);
@@ -108,7 +108,7 @@ node --import tsx --test --test-name-pattern "Groq|topic research" tests/automat
 
 Expected: FAIL because the existing constructor and response contract still expect Gemini, and `GROQ_RATE_LIMITED` does not exist.
 
-- [ ] **Step 3: Implement the minimal Groq Compound service**
+- [ ] **Step 3: Implement the minimal Groq Compound Mini service**
 
 Refactor `TopicResearchService` to use this request shape and parsing boundary:
 
@@ -148,7 +148,7 @@ export class TopicResearchService {
       temperature: 0.65,
       max_completion_tokens: 5000,
       response_format: { type: "json_object" },
-      compound_custom: { tools: { enabled_tools: ["web_search", "visit_website"] } }
+      compound_custom: { tools: { enabled_tools: ["web_search"] } }
     });
     const candidates = this.parseCandidates(response.data);
     return candidates.map(candidate => ({
@@ -312,7 +312,7 @@ Replace the backend Gemini block in `env.ts` with:
 
 ```ts
 GROQ_API_KEY: z.string().min(1).optional(),
-GROQ_TOPIC_RESEARCH_MODEL: z.string().default("groq/compound"),
+GROQ_TOPIC_RESEARCH_MODEL: z.string().default("groq/compound-mini"),
 GROQ_API_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
 ```
 
@@ -360,7 +360,7 @@ Expected: no matches.
 
 **Interfaces:**
 - Consumes: completed Groq topic-research service and backend environment wiring
-- Produces: rebuilt running backend services using Groq Compound for topic research
+- Produces: rebuilt running backend services using Groq Compound Mini for topic research
 
 - [ ] **Step 1: Run the complete backend test suite**
 

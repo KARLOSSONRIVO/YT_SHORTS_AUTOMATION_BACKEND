@@ -15,6 +15,9 @@ const envSchema = z.object({
   YOUTUBE_CLIENT_ID: z.string().min(1),
   YOUTUBE_CLIENT_SECRET: z.string().min(1),
   YOUTUBE_REDIRECT_URI: z.string().url(),
+  REDDIT_CLIENT_ID: z.string().min(1).optional(),
+  REDDIT_CLIENT_SECRET: z.string().min(1).optional(),
+  REDDIT_USER_AGENT: z.string().min(3).default("ShortsStudio/2.0 (unified-story-automation)"),
   FRONTEND_APP_URL: z.string().url().default("http://localhost:3000"),
   AUTH_TOKEN_SECRET: z.string().min(16).default("shorts-studio-dev-auth-secret"),
   AUTH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
@@ -22,7 +25,13 @@ const envSchema = z.object({
   TEMP_UPLOAD_DIR: z.string().default("./storage/tmp"),
   MAX_FILE_SIZE_BYTES: z.coerce.number().int().positive().default(1024 * 1024 * 1024),
   FFMPEG_PATH: z.string().default("ffmpeg"),
-  FFPROBE_PATH: z.string().default("ffprobe")
+  FFPROBE_PATH: z.string().default("ffprobe"),
+  GROQ_API_KEY: z.string().min(1).optional(),
+  GROQ_TOPIC_RESEARCH_MODEL: z.string().default("groq/compound-mini"),
+  GROQ_TOPIC_RESEARCH_FALLBACK_MODEL: z.string().default("qwen/qwen3.6-27b"),
+  GROQ_TOPIC_RESEARCH_SECONDARY_FALLBACK_MODEL: z.string().default("llama-3.1-8b-instant"),
+  GROQ_API_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
+  AUTOMATION_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(10000).default(60000)
 });
 
 const parsedEnv = envSchema.parse(process.env);

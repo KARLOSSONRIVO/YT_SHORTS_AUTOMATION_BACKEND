@@ -1,4 +1,5 @@
 import { HydratedDocument, Schema, Types, model } from "mongoose";
+import { AUTOMATION_MODES, CONTENT_TYPES, STORY_FORMATS, VISUAL_TYPES, type AutomationMode, type ContentType, type StoryFormat, type VisualType } from "../automation/automation.types";
 
 export interface ProjectSubtitlePreferences {
   fontFamily: string;
@@ -9,17 +10,6 @@ export interface ProjectSubtitlePreferences {
   position: "bottom_center" | "top_center" | "middle_center";
   maxCharsPerLine: number;
   maxLines: number;
-}
-
-export interface RedditSourceMetadata {
-  postId: string;
-  permalink: string;
-  title: string;
-  body: string;
-  subreddit: string;
-  author?: string;
-  score?: number;
-  fetchedAt: Date;
 }
 
 export const DEFAULT_PROJECT_SUBTITLE_PREFERENCES: ProjectSubtitlePreferences = {
@@ -36,11 +26,34 @@ export const DEFAULT_PROJECT_SUBTITLE_PREFERENCES: ProjectSubtitlePreferences = 
 export interface Project {
   userId: Types.ObjectId;
   title: string;
+  name?: string;
   description?: string;
   hashtags?: string;
   targetClipCount?: number;
   projectType: "uploaded_video" | "faceless_story";
-  facelessSource?: "topic" | "reddit_trending";
+  contentType: ContentType;
+  visualType?: VisualType;
+  facelessSource?: "daily_automation" | "archived_legacy";
+  legacySource?: string;
+  parentProjectId?: Types.ObjectId;
+  internalStory?: boolean;
+  archivedLegacy?: boolean;
+  legacyAutomationId?: Types.ObjectId;
+  nicheId?: string;
+  accountId?: Types.ObjectId;
+  timezone?: string;
+  uploadTime?: string;
+  durationSeconds?: number;
+  storyFormatMode?: "auto_select" | "manual_select" | "selected_formats";
+  manualStoryFormat?: StoryFormat;
+  allowedStoryFormats?: StoryFormat[];
+  automationMode?: AutomationMode;
+  automationEnabled?: boolean;
+  automationStatus?: "active" | "paused" | "running" | "error";
+  nextRunAt?: Date;
+  lastRunAt?: Date;
+  lastSuccessfulGenerationAt?: Date;
+  lastUploadAt?: Date;
   topic?: string;
   platforms: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
@@ -50,7 +63,10 @@ export interface Project {
   voice?: string;
   tone?: string;
   audience?: string;
-  redditSource?: RedditSourceMetadata;
+  language?: string;
+  storyFormat?: string;
+  speakingRate?: number;
+  fallbackVoice?: string;
   status:
     | "draft"
     | "queued"
@@ -102,24 +118,11 @@ const subtitlePreferencesSchema = new Schema<ProjectSubtitlePreferences>(
   { _id: false }
 );
 
-const redditSourceMetadataSchema = new Schema<RedditSourceMetadata>(
-  {
-    postId: { type: String, required: true, trim: true },
-    permalink: { type: String, required: true, trim: true },
-    title: { type: String, required: true, trim: true },
-    body: { type: String, required: true },
-    subreddit: { type: String, required: true, trim: true },
-    author: { type: String, trim: true },
-    score: { type: Number },
-    fetchedAt: { type: Date, required: true }
-  },
-  { _id: false }
-);
-
 const projectSchema = new Schema<Project>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     title: { type: String, required: true, trim: true },
+    name: { type: String, trim: true },
     description: { type: String, trim: true },
     hashtags: { type: String, trim: true },
     targetClipCount: { type: Number, min: 1, max: 20, default: 5 },
@@ -131,8 +134,30 @@ const projectSchema = new Schema<Project>(
     },
     facelessSource: {
       type: String,
-      enum: ["topic", "reddit_trending"]
+      enum: ["daily_automation", "archived_legacy"]
     },
+    contentType: { type: String, enum: CONTENT_TYPES, required: true, default: "FACELESS_NICHE", index: true },
+    visualType: { type: String, enum: VISUAL_TYPES, default: "AUTO" },
+    legacySource: { type: String, trim: true },
+    parentProjectId: { type: Schema.Types.ObjectId, ref: "Project", index: true },
+    internalStory: { type: Boolean, default: false, index: true },
+    archivedLegacy: { type: Boolean, default: false, index: true },
+    legacyAutomationId: { type: Schema.Types.ObjectId, index: true, unique: true, sparse: true },
+    nicheId: { type: String, index: true },
+    accountId: { type: Schema.Types.ObjectId, ref: "Channel", index: true },
+    timezone: { type: String, trim: true },
+    uploadTime: { type: String, trim: true },
+    durationSeconds: { type: Number, default: 60, min: 15, max: 180 },
+    storyFormatMode: { type: String, enum: ["auto_select", "manual_select", "selected_formats"], default: "auto_select" },
+    manualStoryFormat: { type: String, enum: STORY_FORMATS },
+    allowedStoryFormats: [{ type: String, enum: STORY_FORMATS }],
+    automationMode: { type: String, enum: AUTOMATION_MODES, default: "approval_before_upload" },
+    automationEnabled: { type: Boolean, default: false, index: true },
+    automationStatus: { type: String, enum: ["active", "paused", "running", "error"], default: "paused", index: true },
+    nextRunAt: { type: Date, index: true },
+    lastRunAt: Date,
+    lastSuccessfulGenerationAt: Date,
+    lastUploadAt: Date,
     topic: { type: String, trim: true },
     platforms: {
       type: [String],
@@ -154,7 +179,10 @@ const projectSchema = new Schema<Project>(
     voice: { type: String, trim: true },
     tone: { type: String, trim: true },
     audience: { type: String, trim: true },
-    redditSource: { type: redditSourceMetadataSchema },
+    language: { type: String, trim: true, default: "en" },
+    storyFormat: { type: String, trim: true },
+    speakingRate: { type: Number, min: 0.5, max: 2 },
+    fallbackVoice: { type: String, trim: true },
     status: {
       type: String,
       enum: [
@@ -202,6 +230,11 @@ const projectSchema = new Schema<Project>(
   },
   { timestamps: true }
 );
+
+projectSchema.index({ userId: 1, internalStory: 1, createdAt: -1 });
+projectSchema.index({ automationEnabled: 1, nextRunAt: 1 });
+projectSchema.index({ accountId: 1, automationEnabled: 1 });
+projectSchema.index({ contentType: 1, automationStatus: 1, nextRunAt: 1 });
 
 export type ProjectDocument = HydratedDocument<Project>;
 export const ProjectModel = model<Project>("Project", projectSchema);

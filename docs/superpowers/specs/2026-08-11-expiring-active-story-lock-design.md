@@ -10,7 +10,7 @@ story generations from running concurrently.
 
 `AutomationRunCoordinator.begin()` will acquire
 `automation:active-story-project` as a six-hour Redis lease using
-`SET key value NX EX 21600`. A successful acquisition starts the lease.
+`SET key value EX 21600 NX`. A successful acquisition starts the lease.
 
 When the same project and run retry, `begin()` will recognize the identical
 lock value and refresh its six-hour expiration. The refresh must compare and
@@ -38,7 +38,7 @@ intervals change.
 
 Coordinator tests will prove that:
 
-1. a new lock is acquired with `NX EX 21600`;
+1. a new lock is acquired with `EX 21600 NX`;
 2. an identical retry atomically refreshes the lease;
 3. a different project remains queued and cannot refresh the owner lease;
 4. `finish()` still permits only the owning project to delete the lock.

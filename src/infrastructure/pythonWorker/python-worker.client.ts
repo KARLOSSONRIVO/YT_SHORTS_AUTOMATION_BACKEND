@@ -136,22 +136,6 @@ export interface PythonFacelessAudioResponse {
   voice: string;
 }
 
-export interface PythonFacelessVoice {
-  voice: string;
-  label: string;
-  language: string;
-  gender: string;
-  quality_grade?: string | null;
-  sample_text: string;
-}
-
-export interface PythonFacelessVoicePreviewResponse {
-  voice: string;
-  audio_path: string;
-  audio_url: string;
-  sample_text: string;
-}
-
 export interface PythonFacelessSubtitleResponse {
   job_id: string;
   project_id: string;
@@ -381,6 +365,8 @@ export class PythonWorkerClient {
     stylePreset?: string;
     audience?: string;
     scriptFramework?: "psychology_truth" | "history_story";
+    storyFormat?: string;
+    speakingRate?: number;
   }): Promise<PythonFacelessScriptResponse> {
     const response = await this.client.post<PythonFacelessScriptResponse>("/internal/faceless/generate-script", {
       job_id: input.jobId,
@@ -393,6 +379,8 @@ export class PythonWorkerClient {
       style_preset: input.stylePreset,
       audience: input.audience,
       script_framework: input.scriptFramework
+      ,story_format: input.storyFormat
+      ,speaking_rate: input.speakingRate
     });
 
     return response.data;
@@ -415,23 +403,6 @@ export class PythonWorkerClient {
       narration: input.narration,
       voice: input.voice,
       speaking_rate: input.speakingRate ?? 0.82
-    });
-
-    return response.data;
-  }
-
-  public async requestFacelessVoices(): Promise<PythonFacelessVoice[]> {
-    const response = await this.client.get<PythonFacelessVoice[]>("/internal/faceless/voices");
-    return response.data;
-  }
-
-  public async requestFacelessVoicePreview(input: {
-    voice: string;
-    text?: string;
-  }): Promise<PythonFacelessVoicePreviewResponse> {
-    const response = await this.client.post<PythonFacelessVoicePreviewResponse>("/internal/faceless/preview-voice", {
-      voice: input.voice,
-      text: input.text
     });
 
     return response.data;
@@ -555,9 +526,8 @@ export class PythonWorkerClient {
     audioPath: string;
     subtitlesPath?: string;
     backgroundMusicPath?: string;
-    backgroundVideoPath?: string;
     ambienceAudioPaths?: string[];
-    renderMode?: "scene_images" | "background_video" | "animation_story";
+    renderMode?: "scene_images" | "animation_story";
     musicVolume?: number;
     narrationVolume?: number;
   }): Promise<PythonFacelessRenderResponse> {
@@ -572,7 +542,6 @@ export class PythonWorkerClient {
       audio_path: input.audioPath,
       subtitles_path: input.subtitlesPath,
       background_music_path: input.backgroundMusicPath,
-      background_video_path: input.backgroundVideoPath,
       ambience_audio_paths: input.ambienceAudioPaths ?? [],
       render_mode: input.renderMode ?? "scene_images",
       music_volume: input.musicVolume,

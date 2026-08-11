@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "voices": [
+    { "id": "Kore", "provider": "gemini", "languages": ["en", "fil"], "gender": "female", "traits": ["firm", "clear", "authoritative"], "energy": 0.62, "speed": 1.0, "intensity": 0.68, "accents": ["neutral"], "costPerMillionCharactersUsd": 0, "dailyUsageLimit": null, "priority": 10, "enabled": true },
+    { "id": "Sulafat", "provider": "gemini", "languages": ["en", "fil"], "gender": "female", "traits": ["warm", "emotional", "gentle"], "energy": 0.5, "speed": 0.96, "intensity": 0.58, "accents": ["neutral"], "costPerMillionCharactersUsd": 0, "dailyUsageLimit": null, "priority": 9, "enabled": true },
+    { "id": "Fenrir", "provider": "gemini", "languages": ["en"], "gender": "male", "traits": ["energetic", "excitable", "confident"], "energy": 0.95, "speed": 1.08, "intensity": 0.88, "accents": ["neutral"], "costPerMillionCharactersUsd": 0, "dailyUsageLimit": null, "priority": 9, "enabled": true },
+    { "id": "Charon", "provider": "gemini", "languages": ["en"], "gender": "male", "traits": ["informative", "deep", "controlled"], "energy": 0.42, "speed": 0.93, "intensity": 0.72, "accents": ["neutral"], "costPerMillionCharactersUsd": 0, "dailyUsageLimit": null, "priority": 8, "enabled": true },
+    { "id": "Iapetus", "provider": "gemini", "languages": ["en"], "gender": "male", "traits": ["clear", "cinematic", "authoritative"], "energy": 0.52, "speed": 0.96, "intensity": 0.76, "accents": ["neutral"], "costPerMillionCharactersUsd": 0, "dailyUsageLimit": null, "priority": 8, "enabled": true },
+    { "id": "Autonoe", "provider": "gemini", "languages": ["en"], "gender": "female", "traits": ["bright", "informative", "clear"], "energy": 0.72, "speed": 1.02, "intensity": 0.58, "accents": ["neutral"], "costPerMillionCharactersUsd": 0, "dailyUsageLimit": null, "priority": 8, "enabled": true },
+    { "id": "Achernar", "provider": "gemini", "languages": ["en"], "gender": "female", "traits": ["soft", "calm", "trustworthy"], "energy": 0.38, "speed": 0.94, "intensity": 0.48, "accents": ["neutral"], "costPerMillionCharactersUsd": 0, "dailyUsageLimit": null, "priority": 7, "enabled": true },
+    { "id": "Algenib", "provider": "gemini", "languages": ["en"], "gender": "male", "traits": ["gravelly", "deep", "suspenseful"], "energy": 0.46, "speed": 0.91, "intensity": 0.82, "accents": ["neutral"], "costPerMillionCharactersUsd": 0, "dailyUsageLimit": null, "priority": 7, "enabled": true }
+  ]
+}

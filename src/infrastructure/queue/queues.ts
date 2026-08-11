@@ -7,7 +7,8 @@ export type QueueRegistry = Record<QueueName, Queue>;
 const defaultJobOptions: JobsOptions = {
   attempts: 3,
   removeOnComplete: 100,
-  removeOnFail: 100
+  removeOnFail: 100,
+  backoff: { type: "exponential", delay: 5000 }
 };
 
 export const createQueues = (connection: IORedis): QueueRegistry => {
@@ -17,7 +18,8 @@ export const createQueues = (connection: IORedis): QueueRegistry => {
     [QUEUE_NAMES.ANALYSIS]: new Queue(QUEUE_NAMES.ANALYSIS, { connection, defaultJobOptions }),
     [QUEUE_NAMES.STORY]: new Queue(QUEUE_NAMES.STORY, { connection, defaultJobOptions }),
     [QUEUE_NAMES.RENDER]: new Queue(QUEUE_NAMES.RENDER, { connection, defaultJobOptions }),
-    [QUEUE_NAMES.UPLOAD]: new Queue(QUEUE_NAMES.UPLOAD, { connection, defaultJobOptions })
+    [QUEUE_NAMES.UPLOAD]: new Queue(QUEUE_NAMES.UPLOAD, { connection, defaultJobOptions }),
+    [QUEUE_NAMES.AUTOMATION]: new Queue(QUEUE_NAMES.AUTOMATION, { connection, defaultJobOptions })
   };
 };
 

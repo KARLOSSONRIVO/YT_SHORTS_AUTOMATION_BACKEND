@@ -13,6 +13,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json tsconfig.json ./
 COPY src ./src
 COPY scripts ./scripts
+COPY config ./config
 
 RUN npm run build
 
@@ -28,6 +29,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/config ./config
 
 RUN mkdir -p /app/storage /app/storage/tmp
 

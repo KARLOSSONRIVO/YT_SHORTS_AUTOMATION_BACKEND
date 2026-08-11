@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "defaults": {
+    "targetDurationSeconds": 60,
+    "language": "en",
+    "region": "US",
+    "timezone": "Asia/Manila",
+    "uploadTime": "19:00",
+    "dailyUploadLimit": 1,
+    "automationMode": "approval_before_upload",
+    "similarityThreshold": 0.78
+  },
+  "niches": [
+    {
+      "id": "sports",
+      "name": "Sports",
+      "tones": ["exciting", "energetic", "dramatic"],
+      "targetAudience": ["sports fans", "teenagers", "young adults", "casual viewers"],
+      "preferredVoice": { "energy": 0.9, "speed": 1.08, "intensity": 0.85, "traits": ["energetic", "confident"] },
+      "visualStyle": "kinetic sports documentary, dramatic stadium lighting, realistic action, fast camera movement",
+      "contentRestrictions": ["Do not invent scores, statistics, quotes, injuries, transfers, or results", "Use recent sources for current sports"],
+      "preferredTopicCategories": ["unbelievable moments", "athlete stories", "controversies", "records", "rivalries"],
+      "preferredStoryFormats": ["record_breaking_moment", "rise_and_fall", "controversy", "one_decision_changed_everything", "unexpected_ending"],
+      "hashtagCategories": ["sports", "athletes", "records", "sports_history"],
+      "language": "en",
+      "region": "US"
+    },
+    {
+      "id": "world_history",
+      "name": "World History",
+      "tones": ["mysterious", "dramatic", "educational"],
+      "targetAudience": ["students", "history fans", "curious viewers"],
+      "preferredVoice": { "energy": 0.5, "speed": 0.94, "intensity": 0.75, "traits": ["deep", "cinematic", "authoritative"] },
+      "visualStyle": "cinematic historical documentary, period-authentic environments, archival texture, maps and timelines",
+      "contentRestrictions": ["Distinguish established history from disputed interpretation", "Avoid graphic gore and fabricated quotations"],
+      "preferredTopicCategories": ["forgotten events", "wars", "strange facts", "powerful rulers", "lost civilizations"],
+      "preferredStoryFormats": ["hidden_history", "mystery_reveal", "rise_and_fall", "what_really_happened", "tragedy"],
+      "hashtagCategories": ["history", "world_history", "historical_facts", "documentary"],
+      "language": "en",
+      "region": "GLOBAL"
+    },
+    {
+      "id": "philippine_history",
+      "name": "Philippine History",
+      "tones": ["educational", "emotional", "patriotic", "mysterious"],
+      "targetAudience": ["Filipino students", "history fans", "general Filipino viewers"],
+      "preferredVoice": { "energy": 0.55, "speed": 0.96, "intensity": 0.7, "traits": ["warm", "clear", "authoritative"] },
+      "visualStyle": "cinematic Philippine historical documentary, period-authentic clothing and locations, archival photographs, maps",
+      "contentRestrictions": ["Prefer Philippine archives, museums, universities, and government sources", "Label legends and oral traditions clearly"],
+      "preferredTopicCategories": ["forgotten Filipino heroes", "historical mysteries", "important events", "unusual facts", "Philippine legends"],
+      "preferredStoryFormats": ["hero_story", "hidden_history", "mystery_reveal", "what_really_happened", "myth_versus_fact"],
+      "hashtagCategories": ["philippines", "philippine_history", "pinoy_history", "filipino"],
+      "language": "en",
+      "region": "PH"
+    },
+    {
+      "id": "mysteries",
+      "name": "Mysteries",
+      "tones": ["suspenseful", "controlled", "mysterious"],
+      "targetAudience": ["mystery fans", "curious viewers", "young adults"],
+      "preferredVoice": { "energy": 0.45, "speed": 0.92, "intensity": 0.8, "traits": ["suspenseful", "controlled", "deep"] },
+      "visualStyle": "moody investigative documentary, shadowy environments, evidence close-ups, restrained cinematic movement",
+      "contentRestrictions": ["Never present speculation as confirmed fact", "Avoid identifying private individuals as suspects"],
+      "preferredTopicCategories": ["unsolved events", "strange disappearances", "cryptic discoveries", "historical mysteries"],
+      "preferredStoryFormats": ["unsolved_mystery", "mystery_reveal", "what_really_happened", "unexpected_ending"],
+      "hashtagCategories": ["mystery", "unsolved", "strange_history", "investigation"],
+      "language": "en",
+      "region": "GLOBAL"
+    },
+    {
+      "id": "psychology",
+      "name": "Psychology",
+      "tones": ["calm", "trustworthy", "insightful"],
+      "targetAudience": ["young adults", "self-improvement viewers", "curious viewers"],
+      "preferredVoice": { "energy": 0.45, "speed": 0.98, "intensity": 0.55, "traits": ["calm", "trustworthy", "clear"] },
+      "visualStyle": "grounded human behavior, intimate cinematic close-ups, clean motion graphics, relatable everyday settings",
+      "contentRestrictions": ["Do not diagnose viewers", "Avoid medical advice and unsupported pop-psychology claims"],
+      "preferredTopicCategories": ["habits", "biases", "relationships", "memory", "decision making"],
+      "preferredStoryFormats": ["psychological_explanation", "myth_versus_fact", "unexpected_ending", "one_decision_changed_everything"],
+      "hashtagCategories": ["psychology", "behavior", "mind", "self_awareness"],
+      "language": "en",
+      "region": "GLOBAL"
+    },
+    {
+      "id": "science",
+      "name": "Science",
+      "tones": ["curious", "clear", "awe-inspiring"],
+      "targetAudience": ["students", "science fans", "curious viewers"],
+      "preferredVoice": { "energy": 0.65, "speed": 1.0, "intensity": 0.6, "traits": ["clear", "bright", "informative"] },
+      "visualStyle": "high-detail science documentary, macro imagery, space and nature footage, clean explanatory motion graphics",
+      "contentRestrictions": ["Prefer peer-reviewed papers and scientific institutions", "State uncertainty and study limitations"],
+      "preferredTopicCategories": ["space", "biology", "physics", "earth science", "technology discoveries"],
+      "preferredStoryFormats": ["shocking_fact", "myth_versus_fact", "unexpected_ending", "what_really_happened"],
+      "hashtagCategories": ["science", "discovery", "space", "facts"],
+      "language": "en",
+      "region": "GLOBAL"
+    },
+    {
+      "id": "true_stories",
+      "name": "True Stories",
+      "tones": ["emotional", "dramatic", "respectful"],
+      "targetAudience": ["story lovers", "young adults", "general viewers"],
+      "preferredVoice": { "energy": 0.55, "speed": 0.96, "intensity": 0.75, "traits": ["warm", "emotional", "clear"] },
+      "visualStyle": "cinematic human-interest documentary, realistic environments, expressive details, respectful reenactment",
+      "contentRestrictions": ["Protect private people and minors", "Avoid graphic detail and sensationalizing trauma"],
+      "preferredTopicCategories": ["survival", "courage", "unlikely coincidences", "life-changing decisions", "extraordinary rescues"],
+      "preferredStoryFormats": ["hero_story", "tragedy", "one_decision_changed_everything", "unexpected_ending", "rise_and_fall"],
+      "hashtagCategories": ["true_story", "inspiring", "survival", "human_stories"],
+      "language": "en",
+      "region": "GLOBAL"
+    }
+  ]
+}

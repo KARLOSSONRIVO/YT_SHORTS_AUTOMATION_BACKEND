@@ -6,10 +6,15 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "worker:dev": "tsx watch src/worker.ts",
+    "scheduler:dev": "tsx watch src/scheduler.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/server.js",
     "worker": "node dist/src/worker.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "scheduler": "node dist/src/scheduler.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "migrate:project-automation": "tsx src/migrations/20260713-unify-project-automation.ts"
+    ,"migrate:unified-content-types": "tsx src/migrations/20260713-unified-content-types.ts"
   },
   "dependencies": {
     "axios": "^1.8.4",

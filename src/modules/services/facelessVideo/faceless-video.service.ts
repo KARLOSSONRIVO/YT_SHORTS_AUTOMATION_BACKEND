@@ -2,22 +2,20 @@ import { AppError } from "../../../common/errors/app-error";
 import { QUEUE_NAMES } from "../../../infrastructure/queue/queue.names";
 import {
   type PythonFacelessScene,
-  type PythonFacelessVoice,
   type PythonWorkerClient
 } from "../../../infrastructure/pythonWorker/python-worker.client";
 import { type ProjectDocument } from "../../models/project.model";
-import { type ProjectSubtitlePreferences } from "../../models/project.model";
 import { type StoryAssetDocument, type StoryAssetType } from "../../models/story-asset.model";
 import { FacelessVideoRepository } from "../../repositories/faceless-video.repository";
-import { UploadHistoryRepository } from "../../repositories/upload-history.repository";
 import { JobService } from "../job/job.service";
 import { ProjectService } from "../project/project.service";
 import { QueueService } from "../queue/queue.service";
-import { RedditTrendingService } from "../redditStory/reddit-trending.service";
+import { isRateLimitFailure } from "../../automation/retry-policy";
 
 export type FacelessStage = "script" | "audio" | "subtitles" | "scenes" | "animations" | "ambience" | "render";
 
 export interface CreateFacelessProjectInput {
+  parentProjectId: string;
   userId: string;
   title?: string;
   description?: string;
@@ -30,14 +28,10 @@ export interface CreateFacelessProjectInput {
   voice?: string;
   tone?: string;
   audience?: string;
-}
-
-export interface CreateTrendingRedditProjectInput {
-  userId: string;
-  topic?: string;
-  maxDurationSeconds?: number;
-  voice?: string;
-  subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
+  language?: string;
+  storyFormat?: string;
+  speakingRate?: number;
+  fallbackVoice?: string;
 }
 
 interface StoryStagePayload {
@@ -67,46 +61,16 @@ const NEXT_STAGE: Partial<Record<FacelessStage, FacelessStage>> = {
 };
 
 export class FacelessVideoService {
-  private static readonly MAX_REDDIT_SHORT_DURATION_SECONDS = 180;
-  private static readonly REDDIT_ESTIMATED_WORDS_PER_SECOND = 1.75;
-  private static readonly REDDIT_ESTIMATED_OVERHEAD_SECONDS = 10;
-
   constructor(
     private readonly projectService: ProjectService,
     private readonly jobService: JobService,
     private readonly queueService: QueueService,
     private readonly pythonWorkerClient: PythonWorkerClient,
-    private readonly facelessVideoRepository: FacelessVideoRepository,
-    private readonly redditTrendingService: RedditTrendingService,
-    private readonly uploadHistoryRepository?: UploadHistoryRepository
+    private readonly facelessVideoRepository: FacelessVideoRepository
   ) {}
 
-  public createProject(input: CreateFacelessProjectInput) {
-    return this.projectService.createFacelessStoryProject(input);
-  }
-
-  public async createTrendingRedditProject(input: CreateTrendingRedditProjectInput) {
-    const redditPost = await this.redditTrendingService.pickTrendingPost({
-      topic: input.topic
-    });
-
-    return this.projectService.createRedditStoryProject({
-      userId: input.userId,
-      subreddit: redditPost.subreddit,
-      maxDurationSeconds: input.maxDurationSeconds,
-      voice: input.voice,
-      subtitlePreferences: input.subtitlePreferences,
-      redditSource: {
-        postId: redditPost.postId,
-        permalink: redditPost.permalink,
-        title: redditPost.title,
-        body: redditPost.body,
-        subreddit: redditPost.subreddit,
-        author: redditPost.author,
-        score: redditPost.score,
-        fetchedAt: redditPost.fetchedAt
-      }
-    });
+  public createGeneratedStoryProject(input: CreateFacelessProjectInput) {
+    return this.projectService.createGeneratedStoryProject(input);
   }
 
   public async enqueueStage(projectId: string, stage: FacelessStage, options: { autoRun?: boolean } = {}) {
@@ -144,67 +108,6 @@ export class FacelessVideoService {
 
   public startAutomation(projectId: string) {
     return this.enqueueStage(projectId, "script", { autoRun: true });
-  }
-
-  public async getProjectStatus(projectId: string) {
-    const [project, script, assets, render, jobs] = await Promise.all([
-      this.projectService.getProjectOrThrow(projectId),
-      this.facelessVideoRepository.findScript(projectId),
-      this.facelessVideoRepository.findAssets(projectId),
-      this.facelessVideoRepository.findRender(projectId),
-      this.jobService.listByProjectId(projectId)
-    ]);
-
-    return {
-      project,
-      script,
-      render,
-      latestJob: jobs[0] ?? null,
-      counts: {
-        scenes: script?.scenes.length ?? 0,
-        assets: assets.length
-      }
-    };
-  }
-
-  public listAssets(projectId: string) {
-    return this.facelessVideoRepository.findAssets(projectId);
-  }
-
-  public listVoices(): Promise<PythonFacelessVoice[]> {
-    return this.pythonWorkerClient.requestFacelessVoices();
-  }
-
-  public async getVoicePreview(voice: string) {
-    const preview = await this.pythonWorkerClient.requestFacelessVoicePreview({ voice });
-    const audio = await this.pythonWorkerClient.downloadBinary(preview.audio_url);
-
-    return {
-      voice: preview.voice,
-      buffer: audio,
-      mimeType: "audio/wav",
-      fileName: `${preview.voice}.wav`,
-      sampleText: preview.sample_text
-    };
-  }
-
-  public async getLatestPublishInfo(projectId: string) {
-    if (!this.uploadHistoryRepository) {
-      return null;
-    }
-
-    const latestUpload = await this.uploadHistoryRepository.findLatestByProjectId(projectId);
-    if (!latestUpload || latestUpload.status !== "uploaded" || !latestUpload.youtubeVideoId) {
-      return null;
-    }
-
-    return {
-      youtubeVideoId: latestUpload.youtubeVideoId,
-      videoUrl: `https://www.youtube.com/watch?v=${latestUpload.youtubeVideoId}`,
-      uploadedAt: latestUpload.uploadedAt?.toISOString(),
-      title: latestUpload.title,
-      privacyStatus: latestUpload.privacyStatus
-    };
   }
 
   public async processStage(payload: StoryStagePayload) {
@@ -251,6 +154,15 @@ export class FacelessVideoService {
 
       return result;
     } catch (error) {
+      if (isRateLimitFailure(error)) {
+        await this.projectService.updateProject(payload.projectId, { status: "queued" });
+        await this.jobService.updateJob(payload.jobId, {
+          status: "queued",
+          errorMessage: "AI provider rate limit reached. This step is queued and will retry after 30, 60, then 120 seconds.",
+          progress: { message: "Rate limited by the AI provider; waiting to resume this step." }
+        });
+        throw error;
+      }
       await this.projectService.updateProject(payload.projectId, { status: "failed" });
       if (payload.stage === "render") {
         await this.facelessVideoRepository.upsertRender(payload.projectId, {
@@ -265,12 +177,6 @@ export class FacelessVideoService {
 
   private async processScript(payload: StoryStagePayload) {
     const project = await this.projectService.getProjectOrThrow(payload.projectId);
-    if (project.facelessSource === "reddit_trending" && project.redditSource) {
-      const script = await this.buildRedditStoryScript(payload, project);
-      await this.markJobCompleted(payload.jobId, { scriptId: script.id, sceneCount: script.scenes.length });
-      return script;
-    }
-
     if (!project.topic) {
       throw new AppError("A topic is required before generating a faceless script.", 409, "TOPIC_REQUIRED");
     }
@@ -282,6 +188,9 @@ export class FacelessVideoService {
       topic: project.topic,
       tone: project.tone,
       audience: project.audience,
+      language: project.language,
+      storyFormat: project.storyFormat,
+      speakingRate: project.speakingRate,
       targetDurationSeconds: project.targetDurationSeconds,
       stylePreset: project.stylePreset,
       scriptFramework: this.effectiveScriptFramework(project)
@@ -317,18 +226,21 @@ export class FacelessVideoService {
       this.getScriptOrThrow(payload.projectId)
     ]);
 
-    const response = await this.pythonWorkerClient.requestFacelessAudio({
+    const audioRequest = {
       jobId: payload.jobId,
       projectId: payload.projectId,
       projectTitle: project.title,
       outputBucket: this.outputBucketForProject(project),
       narration: this.narrationWithOpeningPause(script),
       voice: project.voice,
-      speakingRate:
-        project.facelessSource === "reddit_trending"
-          ? this.redditSpeakingRate(script.narration)
-          : undefined
-    });
+      speakingRate: project.speakingRate
+    };
+    let response;
+    try { response = await this.pythonWorkerClient.requestFacelessAudio(audioRequest); }
+    catch (error) {
+      if (!project.fallbackVoice || project.fallbackVoice === project.voice) throw error;
+      response = await this.pythonWorkerClient.requestFacelessAudio({ ...audioRequest, voice: project.fallbackVoice });
+    }
 
     const assets = await this.facelessVideoRepository.replaceAssets(payload.projectId, ["narration_audio"], [
       {
@@ -401,10 +313,6 @@ export class FacelessVideoService {
       this.getScriptOrThrow(payload.projectId)
     ]);
 
-    if (project.facelessSource === "reddit_trending") {
-      throw new AppError("Reddit story projects render against the provided background video and skip scene generation.", 409, "REDDIT_SCENES_NOT_REQUIRED");
-    }
-
     const response = await this.pythonWorkerClient.requestFacelessScenes({
       jobId: payload.jobId,
       projectId: payload.projectId,
@@ -437,9 +345,6 @@ export class FacelessVideoService {
       this.getScriptOrThrow(payload.projectId)
     ]);
 
-    if (project.facelessSource === "reddit_trending") {
-      throw new AppError("Reddit story projects render against the provided background video and skip scene animation.", 409, "REDDIT_ANIMATIONS_NOT_REQUIRED");
-    }
     if (project.facelessRenderMode !== "animation_story") {
       throw new AppError("This project is configured for image story rendering.", 409, "ANIMATION_NOT_ENABLED");
     }
@@ -587,7 +492,7 @@ export class FacelessVideoService {
       .map((asset) => asset.absolutePath)
       .filter((assetPath): assetPath is string => typeof assetPath === "string" && assetPath.length > 0);
 
-    if (project.facelessSource !== "reddit_trending" && project.facelessRenderMode !== "animation_story" && imagePaths.length === 0) {
+    if (project.facelessRenderMode !== "animation_story" && imagePaths.length === 0) {
       throw new AppError("Scene images are required before rendering.", 409, "SCENE_IMAGES_REQUIRED");
     }
     if (project.facelessRenderMode === "animation_story" && animationPaths.length === 0) {
@@ -610,9 +515,7 @@ export class FacelessVideoService {
       audioPath: audioAsset.absolutePath,
       subtitlesPath: subtitleAsset?.absolutePath,
       ambienceAudioPaths: project.facelessRenderMode === "animation_story" ? ambiencePaths : [],
-      renderMode: project.facelessSource === "reddit_trending" ? "background_video" : project.facelessRenderMode === "animation_story" ? "animation_story" : "scene_images",
-      musicVolume: project.facelessSource === "reddit_trending" ? 0.03 : undefined,
-      narrationVolume: project.facelessSource === "reddit_trending" ? 2 : undefined
+      renderMode: project.facelessRenderMode === "animation_story" ? "animation_story" : "scene_images"
     });
 
     const [render, assets] = await Promise.all([
@@ -641,164 +544,6 @@ export class FacelessVideoService {
       assetIds: assets.map((asset) => asset.id)
     });
     return render;
-  }
-
-  private async buildRedditStoryScript(payload: StoryStagePayload, project: ProjectDocument) {
-    const redditSource = project.redditSource;
-    if (!redditSource) {
-      throw new AppError("Reddit source metadata is missing for this project.", 409, "REDDIT_SOURCE_REQUIRED");
-    }
-
-    const sceneChunks = this.buildRedditSceneChunks({
-      title: redditSource.title,
-      body: redditSource.body,
-      maxDurationSeconds: project.targetDurationSeconds ?? undefined
-    });
-
-    const title = project.title?.trim() || redditSource.title;
-    const narration = [redditSource.title, ...sceneChunks.map((scene) => scene.narration)].join("\n\n");
-    const captionText = redditSource.body;
-    const estimatedNarrationDuration = this.estimateRedditNarrationDurationSeconds(narration);
-
-    if (estimatedNarrationDuration > FacelessVideoService.MAX_REDDIT_SHORT_DURATION_SECONDS) {
-      throw new AppError(
-        "This Reddit story is too long for Shorts. Stories longer than 3 minutes are skipped.",
-        409,
-        "REDDIT_STORY_TOO_LONG"
-      );
-    }
-
-    const script = await this.facelessVideoRepository.upsertScript(payload.projectId, {
-      title,
-      hook: redditSource.title,
-      narration,
-      captionText,
-      imagePrompts: [],
-      scenes: sceneChunks
-    });
-
-    await this.projectService.updateProject(payload.projectId, {
-      title,
-      topic: redditSource.title,
-      workflowStage: "script",
-      status: "writing_script"
-    });
-
-    return script;
-  }
-
-  private buildRedditSceneChunks(input: {
-    title: string;
-    body: string;
-    maxDurationSeconds?: number;
-  }) {
-    const cleanedParagraphs = input.body
-      .split(/\n{2,}/)
-      .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
-      .filter((paragraph) => paragraph.length > 0);
-
-    const rawParts = cleanedParagraphs.length ? cleanedParagraphs : [input.body.replace(/\s+/g, " ").trim()];
-    const chunks: string[] = [];
-    const maxStoryWords = input.maxDurationSeconds
-      ? Math.max(Math.round(input.maxDurationSeconds * FacelessVideoService.REDDIT_ESTIMATED_WORDS_PER_SECOND), 70)
-      : Number.POSITIVE_INFINITY;
-    let acceptedWords = 0;
-
-    for (const part of rawParts) {
-      if (this.wordCount(part) <= 55) {
-        if (acceptedWords >= maxStoryWords) {
-          break;
-        }
-
-        chunks.push(part);
-        acceptedWords += this.wordCount(part);
-        continue;
-      }
-
-      const sentences = part.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
-      let buffer = "";
-
-      for (const sentence of sentences) {
-        const candidate = buffer ? `${buffer} ${sentence}` : sentence;
-        if (this.wordCount(candidate) <= 55) {
-          buffer = candidate;
-          continue;
-        }
-
-        if (buffer) {
-          if (acceptedWords >= maxStoryWords) {
-            break;
-          }
-          chunks.push(buffer);
-          acceptedWords += this.wordCount(buffer);
-        }
-        buffer = sentence;
-      }
-
-      if (buffer && acceptedWords < maxStoryWords) {
-        chunks.push(buffer);
-        acceptedWords += this.wordCount(buffer);
-      }
-
-      if (acceptedWords >= maxStoryWords) {
-        break;
-      }
-    }
-
-    const usableChunks = chunks.filter((chunk) => chunk.length > 0);
-    const totalWords = Math.max(this.wordCount(usableChunks.join(" ")), 1);
-    const estimatedStoryDuration = Math.max(
-      Number((totalWords / FacelessVideoService.REDDIT_ESTIMATED_WORDS_PER_SECOND).toFixed(2)),
-      15
-    );
-    const totalDuration = input.maxDurationSeconds
-      ? Math.min(estimatedStoryDuration, input.maxDurationSeconds)
-      : estimatedStoryDuration;
-
-    return usableChunks.map((chunk, index) => {
-      const words = Math.max(this.wordCount(chunk), 1);
-      const proportionalDuration = Number(((words / totalWords) * totalDuration).toFixed(2));
-
-      return {
-        sceneIndex: index + 1,
-        narration: chunk,
-        imagePrompt: "Use the configured Reddit background gameplay video.",
-        durationSeconds: Math.max(proportionalDuration, 3),
-        captionText: chunk
-      };
-    });
-  }
-
-  private wordCount(value: string) {
-    return value.split(/\s+/).filter(Boolean).length;
-  }
-
-  private estimateRedditNarrationDurationSeconds(narration: string) {
-    return (
-      this.wordCount(narration) / FacelessVideoService.REDDIT_ESTIMATED_WORDS_PER_SECOND +
-      FacelessVideoService.REDDIT_ESTIMATED_OVERHEAD_SECONDS
-    );
-  }
-
-  private redditSpeakingRate(narration: string) {
-    const normalized = narration.toLowerCase();
-    const horrorSignals = ["terrified", "horror", "murder", "blood", "creepy", "panic", "ambulance", "overdosed"];
-    const sadSignals = ["cry", "heartbroken", "grief", "funeral", "depressed", "lonely", "regret"];
-    const dramaticSignals = ["caught", "exposed", "revenge", "affair", "fired", "wedding", "cheated"];
-
-    if (horrorSignals.some((signal) => normalized.includes(signal))) {
-      return 1.2;
-    }
-
-    if (sadSignals.some((signal) => normalized.includes(signal))) {
-      return 1.2;
-    }
-
-    if (dramaticSignals.some((signal) => normalized.includes(signal))) {
-      return 1.2;
-    }
-
-    return 1.2;
   }
 
   private narrationWithOpeningPause(
@@ -860,19 +605,6 @@ export class FacelessVideoService {
     project: Pick<ProjectDocument, "facelessSource" | "facelessRenderMode">,
     stage: FacelessStage
   ): FacelessStage | undefined {
-    if (project.facelessSource === "reddit_trending") {
-      if (stage === "script") {
-        return "audio";
-      }
-      if (stage === "audio") {
-        return "subtitles";
-      }
-      if (stage === "subtitles") {
-        return "render";
-      }
-      return undefined;
-    }
-
     if (stage === "scenes" && project.facelessRenderMode === "animation_story") {
       return "animations";
     }
@@ -886,19 +618,12 @@ export class FacelessVideoService {
   private effectiveScriptFramework(
     project: Pick<ProjectDocument, "facelessSource" | "scriptFramework">
   ): "psychology_truth" | "history_story" {
-    if (project.facelessSource === "reddit_trending") {
-      return "psychology_truth";
-    }
-
     return project.scriptFramework ?? "psychology_truth";
   }
 
   private outputBucketForProject(project: Pick<ProjectDocument, "projectType" | "facelessSource">): string {
     if (project.projectType === "uploaded_video") {
       return "clipping";
-    }
-    if (project.facelessSource === "reddit_trending") {
-      return "reddit";
     }
     return "faceless_story";
   }

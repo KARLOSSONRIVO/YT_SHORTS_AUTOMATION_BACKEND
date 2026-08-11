@@ -1,49 +1,68 @@
-import { Worker, type Processor, type WorkerOptions } from "bullmq";
+import { UnrecoverableError, Worker, type Processor } from "bullmq";
 import { createApplicationContainer } from "./config/container";
 import { logger } from "./config/logger";
 import { QUEUE_NAMES } from "./infrastructure/queue/queue.names";
+import { isRateLimitFailure } from "./modules/automation/retry-policy";
+import { createWorkerOptions, providerFailureMetadata, shouldRetryAutomationFailure } from "./modules/automation/automation-worker-policy";
+
+const unrecoverableWithCause = (error: unknown, fallback: string) => {
+  const wrapped = new UnrecoverableError(error instanceof Error ? error.message : fallback);
+  wrapped.cause = error;
+  return wrapped;
+};
 
 const bootstrap = async () => {
   const container = await createApplicationContainer();
   const connection = container.redisConnection;
   const workflowOrchestratorService = container.services.workflowOrchestratorService;
   const facelessVideoService = container.services.facelessVideoService;
+  const automationService = container.services.automationService;
 
-  const workerOptions: WorkerOptions = {
-    connection,
-    concurrency: 1
-  };
+  const workerOptions = createWorkerOptions(connection);
 
   const workers = [
     new Worker(
       QUEUE_NAMES.INGEST,
       (async (job) => workflowOrchestratorService.processIngest(job.data)) as Processor,
-      workerOptions
+      workerOptions.shared
     ),
     new Worker(
       QUEUE_NAMES.TRANSCRIPTION,
       (async (job) => workflowOrchestratorService.processTranscription(job.data)) as Processor,
-      workerOptions
+      workerOptions.shared
     ),
     new Worker(
       QUEUE_NAMES.ANALYSIS,
       (async (job) => workflowOrchestratorService.processAnalysis(job.data)) as Processor,
-      workerOptions
+      workerOptions.shared
     ),
     new Worker(
       QUEUE_NAMES.STORY,
-      (async (job) => facelessVideoService.processStage(job.data)) as Processor,
-      workerOptions
+      (async (job) => { try { return await facelessVideoService.processStage(job.data); } catch (error) {
+        if (!isRateLimitFailure(error)) throw unrecoverableWithCause(error, "Permanent story-stage failure");
+        throw error;
+      } }) as Processor,
+      workerOptions.shared
+    ),
+    new Worker(
+      QUEUE_NAMES.AUTOMATION,
+      (async (job) => { try { return await automationService.execute(String(job.data.projectId), job.data.scheduledDate ? String(job.data.scheduledDate) : undefined,
+        job.data.trigger === "manual" ? "manual" : "scheduled"); } catch (error) {
+        await automationService.recordFailure(String(job.data.projectId), error).catch(() => undefined);
+        if (!shouldRetryAutomationFailure(error, job.attemptsMade)) throw unrecoverableWithCause(error, "Permanent automation failure");
+        throw error;
+      } }) as Processor,
+      workerOptions.automation
     ),
     new Worker(
       QUEUE_NAMES.RENDER,
       (async (job) => workflowOrchestratorService.processRender(job.data)) as Processor,
-      workerOptions
+      workerOptions.shared
     ),
     new Worker(
       QUEUE_NAMES.UPLOAD,
       (async (job) => workflowOrchestratorService.processPublish(job.data)) as Processor,
-      workerOptions
+      workerOptions.shared
     )
   ];
 
@@ -61,7 +80,8 @@ const bootstrap = async () => {
         queueName: worker.name,
         bullJobId: job?.id,
         name: job?.name,
-        message: error.message
+        message: error.message,
+        ...providerFailureMetadata(error)
       });
     });
   }

@@ -27,6 +27,7 @@ services:
       - "${PORT:-5001}:5001"
     volumes:
       - ./storage:/app/storage
+      - ../yt_automation/outputs:/app/outputs:ro
     depends_on:
       mongo:
         condition: service_started
@@ -62,6 +63,7 @@ services:
       YOUTUBE_REDIRECT_URI: ${YOUTUBE_REDIRECT_URI:-http://localhost:5001/api/channel/oauth/callback}
     volumes:
       - ./storage:/app/storage
+      - ../yt_automation/outputs:/app/outputs:ro
     depends_on:
       mongo:
         condition: service_started
@@ -71,6 +73,29 @@ services:
         condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  automation-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yt-shorts-automation-scheduler
+    restart: unless-stopped
+    env_file: [.env]
+    command: ["node", "dist/src/scheduler.js"]
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/youtube_shorts_automation
+      REDIS_URL: redis://redis:6379
+      PYTHON_WORKER_BASE_URL: http://host.docker.internal:8000
+      STORAGE_ROOT: /app/storage
+      TEMP_UPLOAD_DIR: /app/storage/tmp
+    volumes:
+      - ./storage:/app/storage
+      - ../yt_automation/outputs:/app/outputs:ro
+    depends_on:
+      mongo: { condition: service_started }
+      redis: { condition: service_started }
+      backend-worker: { condition: service_started }
+    extra_hosts: ["host.docker.internal:host-gateway"]
 
   mongo:
     image: mongo:7

@@ -22,7 +22,10 @@ export class QueueService {
   }
 
   public addStoryJob(payload: Record<string, unknown>) {
-    return this.add("STORY", "faceless.story.requested", payload);
+    return this.add("STORY", "faceless.story.requested", payload, {
+      attempts: 1000,
+      backoff: { type: "provider-rate-limit" }
+    });
   }
 
   public addRenderJob(payload: Record<string, unknown>) {
@@ -31,6 +34,16 @@ export class QueueService {
 
   public addUploadJob(payload: Record<string, unknown>) {
     return this.add("UPLOAD", "clip.upload.requested", payload);
+  }
+
+  public async addAutomationJob(payload: Record<string, unknown>, options?: JobsOptions) {
+    const jobId = options?.jobId == null ? undefined : String(options.jobId);
+    if (jobId) {
+      const existing = await this.queues[QUEUE_NAMES.AUTOMATION].getJob(jobId);
+      if (existing && await existing.isFailed()) await existing.remove();
+      else if (existing) return existing;
+    }
+    return this.add("AUTOMATION", "project.daily-story.requested", payload, options);
   }
 
   public async removeExternalJob(

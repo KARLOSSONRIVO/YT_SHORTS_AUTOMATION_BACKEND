@@ -12,7 +12,7 @@ The backend already receives `GROQ_API_KEY` through its environment. The existin
 
 ## Chosen Approach
 
-The backend will call Groq's OpenAI-compatible chat-completions endpoint directly. Topic research will use `groq/compound`, restricted to Groq's built-in `web_search` and `visit_website` tools, so current facts and authoritative URLs remain available.
+The backend will call Groq's OpenAI-compatible chat-completions endpoint directly. Topic research will use `groq/compound-mini`, restricted to its built-in `web_search` tool, so current facts and authoritative URLs remain available. Live verification found that this Groq project rejects full `groq/compound` requests with HTTP 413, while Compound Mini succeeds.
 
 This is preferred over adding a Python-worker topic-research endpoint because it keeps the existing backend service boundary and avoids an extra internal HTTP contract. It is preferred over a plain Llama model because plain chat generation cannot reliably satisfy the requirement for current facts and verifiable source URLs.
 
@@ -21,7 +21,7 @@ This is preferred over adding a Python-worker topic-research endpoint because it
 The backend environment schema will expose:
 
 - `GROQ_API_KEY`, required by topic research at runtime.
-- `GROQ_TOPIC_RESEARCH_MODEL`, defaulting to `groq/compound`.
+- `GROQ_TOPIC_RESEARCH_MODEL`, defaulting to `groq/compound-mini`.
 - `GROQ_API_BASE_URL`, defaulting to `https://api.groq.com/openai/v1`.
 
 The backend-only Gemini topic-research settings will be removed:
@@ -36,8 +36,8 @@ The backend-only Gemini topic-research settings will be removed:
 ## Request and Response Flow
 
 1. `AutomationService` calls `TopicResearchService.generate()` with the niche profile, language, region, and recent topic/entity history.
-2. `TopicResearchService` sends one request to `/chat/completions` using `groq/compound`.
-3. The request uses JSON object mode and enables only `web_search` and `visit_website` through `compound_custom`.
+2. `TopicResearchService` sends one request to `/chat/completions` using `groq/compound-mini`.
+3. The request uses JSON object mode and enables only `web_search` through `compound_custom`.
 4. The prompt retains the existing candidate schema, freshness rules, content restrictions, and requirement for two authoritative direct source URLs per candidate.
 5. The service extracts `choices[0].message.content`, parses the JSON, and applies the existing minimum-candidate, source-link, and factual-confidence validation.
 6. Each accepted candidate receives a local deterministic embedding from `DuplicateDetector.embedding()`.
@@ -59,7 +59,7 @@ The BullMQ custom backoff identifier and user-facing activity message will becom
 
 Backend tests will prove that:
 
-- Topic research sends the expected Groq authorization header, Compound model, JSON response mode, and built-in web tools.
+- Topic research sends the expected Groq authorization header, Compound Mini model, JSON response mode, and built-in web-search tool.
 - A valid mocked Groq response produces candidates with local embeddings and makes exactly one provider request.
 - Groq 429 responses become actionable retryable errors.
 - Invalid or insufficient candidate JSON is rejected.

@@ -172,7 +172,7 @@ export class PublishService {
       this.channelService.getChannelOrThrow(input.channelId),
       this.facelessVideoRepository.findLatestAssetByType(input.projectId, "final_video")
     ]);
-    const normalizedTitle = this.normalizeUploadTitle(input.title, project.title || "Reddit Story");
+    const normalizedTitle = this.normalizeUploadTitle(input.title, project.title || "Faceless Story");
 
     if (project.projectType !== "faceless_story") {
       throw new AppError("Only faceless story projects can be published from this endpoint.", 409, "PROJECT_NOT_FACELESS");

@@ -26,6 +26,10 @@ export class YouTubeService {
     description: string;
     privacyStatus: "private" | "public" | "unlisted";
     videoPath: string;
+    madeForKids?: boolean;
+    thumbnailPath?: string;
+    subtitlePath?: string;
+    subtitleLanguage?: string;
   }) {
     return this.youTubeClient.uploadShort(input);
   }

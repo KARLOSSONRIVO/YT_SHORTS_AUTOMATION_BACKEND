@@ -51,8 +51,7 @@ export const createApiRouter = (
   );
   router.use(authMiddleware);
   router.use("/upload", createUploadRoutes(controllers.uploadController, uploadMiddleware));
-  router.use("/project", createProjectRoutes(controllers.projectController));
-  router.use("/projects", createProjectRoutes(controllers.projectController));
+  router.use("/projects", createProjectRoutes(controllers.projectController, uploadMiddleware));
   router.use("/clip", createClipRoutes(controllers.clipController));
   router.use("/subtitle", createSubtitleRoutes(controllers.subtitleController));
   router.use("/channel", createChannelRoutes(controllers.channelController));

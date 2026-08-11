@@ -5,6 +5,7 @@ export interface UploadHistory {
   projectId?: Types.ObjectId;
   channelId: Types.ObjectId;
   youtubeVideoId?: string;
+  idempotencyKey?: string;
   localArchiveStorageKey?: string;
   localArchiveMetadataKey?: string;
   title: string;
@@ -21,7 +22,8 @@ const uploadHistorySchema = new Schema<UploadHistory>(
     clipId: { type: Schema.Types.ObjectId, ref: "Clip", index: true },
     projectId: { type: Schema.Types.ObjectId, ref: "Project", index: true },
     channelId: { type: Schema.Types.ObjectId, ref: "Channel", required: true, index: true },
-    youtubeVideoId: { type: String },
+    youtubeVideoId: { type: String, unique: true, sparse: true },
+    idempotencyKey: { type: String, unique: true, sparse: true, index: true },
     localArchiveStorageKey: { type: String },
     localArchiveMetadataKey: { type: String },
     title: { type: String, required: true },

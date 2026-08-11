@@ -104,9 +104,6 @@ export class ProjectCleanupService {
     if (project.projectType === "uploaded_video") {
       return "clipping";
     }
-    if (project.facelessSource === "reddit_trending") {
-      return "reddit";
-    }
     return "faceless_story";
   }
 }

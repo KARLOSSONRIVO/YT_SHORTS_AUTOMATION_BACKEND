@@ -27,6 +27,12 @@ import { SourceVideoRepository } from "../modules/repositories/source-video.repo
 import { TranscriptRepository } from "../modules/repositories/transcript.repository";
 import { UploadHistoryRepository } from "../modules/repositories/upload-history.repository";
 import { UserRepository } from "../modules/repositories/user.repository";
+import { AutomationRepository } from "../modules/repositories/automation.repository";
+import { AutomationService } from "../modules/automation/automation.service";
+import { NicheConfigService } from "../modules/automation/niche-config.service";
+import { TopicResearchService } from "../modules/automation/topic-research.service";
+import { MediaInspectionService } from "../modules/automation/media-inspection.service";
+import { AutomationRunCoordinator } from "../modules/automation/automation-run-coordinator";
 import { AuthService } from "../modules/services/auth/auth.service";
 import { AuthTokenService } from "../modules/services/auth/auth-token.service";
 import { ChannelService } from "../modules/services/channel/channel.service";
@@ -37,7 +43,6 @@ import { ProjectService } from "../modules/services/project/project.service";
 import { ProjectCleanupService } from "../modules/services/project/project-cleanup.service";
 import { PublishService } from "../modules/services/publish/publish.service";
 import { QueueService } from "../modules/services/queue/queue.service";
-import { RedditTrendingService } from "../modules/services/redditStory/reddit-trending.service";
 import { RenderService } from "../modules/services/render/render.service";
 import { SourceVideoService } from "../modules/services/sourceVideo/source-video.service";
 import { StorageService } from "../modules/services/storage/storage.service";
@@ -46,6 +51,8 @@ import { TranscriptService } from "../modules/services/transcript/transcript.ser
 import { UploadService } from "../modules/services/upload/upload.service";
 import { WorkflowOrchestratorService } from "../modules/services/workflow/workflow-orchestrator.service";
 import { YouTubeService } from "../modules/services/youtube/youtube.service";
+import { RedditApiClient, RedditService } from "../modules/services/reddit/reddit.service";
+import { ClipQueueService } from "../modules/services/clipQueue/clip-queue.service";
 
 export const createApplicationContainer = async () => {
   await connectToDatabase(env.MONGODB_URI);
@@ -73,6 +80,8 @@ export const createApplicationContainer = async () => {
   const userRepository = new UserRepository();
   const sourceVideoRepository = new SourceVideoRepository();
   const uploadHistoryRepository = new UploadHistoryRepository();
+  const automationRepository = new AutomationRepository();
+  const automationRunCoordinator = new AutomationRunCoordinator(redisConnection);
 
   const storageService = new StorageService(storageClient);
   await storageService.ensureReady();
@@ -81,7 +90,6 @@ export const createApplicationContainer = async () => {
   const authTokenService = new AuthTokenService(env.AUTH_TOKEN_SECRET, env.AUTH_TOKEN_TTL_DAYS * 24 * 60 * 60);
   const authService = new AuthService(userRepository, authTokenService);
   const projectService = new ProjectService(projectRepository);
-  const redditTrendingService = new RedditTrendingService(projectRepository);
   const sourceVideoService = new SourceVideoService(sourceVideoRepository);
   const transcriptService = new TranscriptService(transcriptRepository, configuredPythonWorkerClient);
   const clipService = new ClipService(clipRepository);
@@ -92,9 +100,7 @@ export const createApplicationContainer = async () => {
     jobService,
     queueService,
     configuredPythonWorkerClient,
-    facelessVideoRepository,
-    redditTrendingService,
-    uploadHistoryRepository
+    facelessVideoRepository
   );
   const uploadService = new UploadService(
     storageService,
@@ -115,6 +121,7 @@ export const createApplicationContainer = async () => {
   );
   const subtitleService = new SubtitleService(clipRepository, clipService, storageService);
   const youTubeService = new YouTubeService(youTubeClient);
+  const redditService = new RedditService(new RedditApiClient(env.REDDIT_CLIENT_ID, env.REDDIT_CLIENT_SECRET, env.REDDIT_USER_AGENT));
   const channelService = new ChannelService(channelRepository, youTubeService);
   const publishService = new PublishService(
     clipService,
@@ -128,6 +135,23 @@ export const createApplicationContainer = async () => {
     facelessVideoRepository,
     configuredPythonWorkerClient
   );
+  const nicheConfigService = new NicheConfigService();
+  await nicheConfigService.ensureSeeded();
+  const topicResearchService = new TopicResearchService(
+    env.GROQ_API_KEY,
+    env.GROQ_TOPIC_RESEARCH_MODEL,
+    env.GROQ_API_BASE_URL,
+    [
+      env.GROQ_TOPIC_RESEARCH_FALLBACK_MODEL,
+      env.GROQ_TOPIC_RESEARCH_SECONDARY_FALLBACK_MODEL
+    ]
+  );
+  const mediaInspectionService = new MediaInspectionService(env.FFPROBE_PATH, env.FFMPEG_PATH);
+  const clipQueueService = new ClipQueueService(projectService, storageService, mediaInspectionService,
+    channelRepository, youTubeService, uploadHistoryRepository, automationRepository);
+  const automationService = new AutomationService(automationRepository, nicheConfigService, topicResearchService,
+    channelRepository, facelessVideoService, projectService, facelessVideoRepository, publishService, queueService,
+    mediaInspectionService, redditService, clipQueueService, automationRunCoordinator);
   const workflowOrchestratorService = new WorkflowOrchestratorService(
     projectService,
     sourceVideoService,
@@ -234,17 +258,14 @@ export const createApplicationContainer = async () => {
       publishService,
       storageService,
       workflowOrchestratorService
+      ,automationService, redditService, clipQueueService
     },
     controllers: {
       authController: new AuthController(authService),
       healthController: new HealthController(redisConnection),
       uploadController: new UploadController(uploadService),
-      projectController: new ProjectController(
-        projectService,
-        facelessVideoService,
-        publishService,
-        projectCleanupService
-      ),
+      projectController: new ProjectController(projectService, automationService, projectCleanupService,
+        nicheConfigService, redditService, clipQueueService),
       subtitleController: new SubtitleController(subtitleService),
       channelController: new ChannelController(channelService),
       publishController: new PublishController(publishService),

@@ -12,7 +12,7 @@
 
 - Redis key remains `automation:active-story-project`.
 - Lease duration is exactly 21,600 seconds (six hours).
-- New acquisition uses `SET key value NX EX 21600`.
+- New acquisition uses `SET key value EX 21600 NX`.
 - Only an identical `projectId|runId` value may refresh the expiration.
 - Different projects remain queued with `AUTOMATION_JOB_QUEUED`.
 - Owner-safe `finish(projectId)` behavior remains unchanged.
@@ -33,8 +33,8 @@
 - [ ] **Step 1: Write failing lease tests**
 
 Create a small in-memory Redis double that implements the coordinator's real
-`set`, `get`, and `eval` contract. Its `set` method records whether `NX EX
-21600` was supplied and sets an observable TTL only when expiration arguments
+`set`, `get`, and `eval` contract. Its `set` method records whether `EX 21600
+NX` was supplied and sets an observable TTL only when expiration arguments
 are present. Its `eval` method models both the refresh script and existing
 owner-safe delete script.
 
