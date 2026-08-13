@@ -179,11 +179,17 @@ export class AutomationService {
     const selected = await this.chooseCandidate(project, candidates, history);
     const storyFormat = this.formats.select(profile, selected, { mode: "auto_select", allowed: project.allowedStoryFormats });
     const voice = this.voices.select(profile, this.config.listVoices(), storyFormat, project.language!);
+    if (redditSelection) await this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "reddit_source_selected", severity: "info",
+      message: `Selected Reddit source from r/${redditSelection.post.subreddit}: ${redditSelection.post.title}`,
+      metadata: { redditSourceId: redditSelection.record.id, subreddit: redditSelection.post.subreddit, title: redditSelection.post.title } });
     const renderProject = await this.faceless.createGeneratedStoryProject({ parentProjectId: projectId, userId: String(project.userId), topic: selected.topic,
       title: selected.title, description: selected.summary, platforms: ["youtube"], targetDurationSeconds: project.durationSeconds ?? 60,
-      stylePreset: profile.visualStyle, scriptFramework: this.formats.framework(storyFormat),
-      facelessRenderMode: this.resolveVisualType(project.visualType ?? "AUTO", selected, profile.visualPreferences),
+      stylePreset: profile.visualStyle, scriptFramework: project.contentType === "REDDIT_STORY" ? "reddit_story" : this.formats.framework(storyFormat),
+      facelessRenderMode: project.contentType === "REDDIT_STORY"
+        ? "background_video"
+        : this.resolveVisualType(project.visualType ?? "AUTO", selected, profile.visualPreferences),
       voice: voice.selected.id, tone: profile.tones.join(", "), audience: profile.targetAudience.join(", "), language: project.language,
+      contentType: project.contentType,
       storyFormat, speakingRate: voice.selected.speed, fallbackVoice: voice.fallback?.id });
     const scheduledUploadTime = trigger === "manual"
       ? new Date()
@@ -198,7 +204,8 @@ export class AutomationService {
       status: "rendering", scheduledUploadTime, platform: "youtube", generationIdempotencyKey,
       uploadIdempotencyKey: workflowIdempotencyKey(projectId, date, "upload"), uploadAttempts: 0, generationAttempts: 1,
       metadata: { candidate: selected, contentRestrictions: profile.contentRestrictions, hashtagCategories: profile.hashtagCategories,
-        researchRequirements: profile.researchRequirements, visualStrategy: project.visualType === "ANIMATED" ? "ai_animated" : "ai_generated",
+        researchRequirements: profile.researchRequirements,
+        visualStrategy: project.contentType === "REDDIT_STORY" ? "background_video" : project.visualType === "ANIMATED" ? "ai_animated" : "ai_generated",
         contentType: project.contentType, redditSourceId: redditSelection?.record.id, assignedAccount: channel.title } });
     if (redditSelection) await redditSelection.record.updateOne({ storyId: content._id, status: "transformed", generatedTitle: selected.title, summary: selected.summary });
     await this.faceless.startAutomation(renderProject.id);
@@ -228,6 +235,7 @@ export class AutomationService {
     const storiesWithPreviews = await Promise.all(stories.map(async (story) => {
       const finalVideo = story.renderProjectId ? await this.assets.findLatestAssetByType(String(story.renderProjectId), "final_video") : null;
       return { ...story.toObject(), createdAt: (story as unknown as { createdAt: Date }).createdAt,
+        lastError: ["failed", "rejected"].includes(story.status) ? story.lastError : undefined,
         metadata: { ...(story.metadata ?? {}), finalVideoUrl: finalVideo?.url } };
     }));
     const todayKey = this.schedules.localDateKey(project.timezone!);
@@ -235,7 +243,7 @@ export class AutomationService {
     const redditSources = project.contentType === "REDDIT_STORY" && this.reddit ? await this.reddit.history(projectId) : [];
     return { project, account, stories: todaysStories, rejectedTopics: rejected, redditSources, activity,
       currentJobStatus: todaysStories.find((story) => !["uploaded", "draft", "failed", "rejected"].includes(story.status))?.status ?? "idle",
-      recentErrors: stories.filter((story) => story.lastError).slice(0, 10).map((story) => ({ storyId: story.id, message: story.lastError, status: story.status })),
+      recentErrors: stories.filter((story) => story.status === "failed" && story.lastError).slice(0, 10).map((story) => ({ storyId: story.id, message: story.lastError, status: story.status })),
       lastSuccessfulGeneration: project.lastSuccessfulGenerationAt, lastUpload: project.lastUploadAt };
   }
 
@@ -385,7 +393,7 @@ export class AutomationService {
       const redditSourceId = content.metadata?.redditSourceId;
       if (this.reddit && typeof redditSourceId === "string") await this.reddit.markUploaded(redditSourceId, result.youtubeVideoId ?? undefined);
       await this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "upload_completed", severity: "info", message: `Published ${meta.title}.`, metadata: { platformVideoId: result.youtubeVideoId } });
-      const uploaded = await this.repository.updateHistory(content.id, { status: "uploaded", uploadDate: new Date(), platformVideoId: result.youtubeVideoId ?? undefined,
+      const uploaded = await this.repository.updateHistory(content.id, { status: "uploaded", lastError: undefined, uploadDate: new Date(), platformVideoId: result.youtubeVideoId ?? undefined,
         platformUrl: result.videoUrl, metadata: { ...(content.metadata ?? {}), platformMetadata: meta } });
       await this.repository.clearCheckpoint(project.id, content.generationIdempotencyKey.split(":")[1] ?? "");
       await this.coordinator?.finish(project.id);

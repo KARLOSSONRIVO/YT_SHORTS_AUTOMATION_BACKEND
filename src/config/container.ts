@@ -121,7 +121,7 @@ export const createApplicationContainer = async () => {
   );
   const subtitleService = new SubtitleService(clipRepository, clipService, storageService);
   const youTubeService = new YouTubeService(youTubeClient);
-  const redditService = new RedditService(new RedditApiClient(env.REDDIT_CLIENT_ID, env.REDDIT_CLIENT_SECRET, env.REDDIT_USER_AGENT));
+  const redditService = new RedditService(new RedditApiClient(env.REDDIT_USER_AGENT));
   const channelService = new ChannelService(channelRepository, youTubeService);
   const publishService = new PublishService(
     clipService,

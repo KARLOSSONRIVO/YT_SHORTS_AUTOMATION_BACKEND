@@ -15,8 +15,6 @@ const envSchema = z.object({
   YOUTUBE_CLIENT_ID: z.string().min(1),
   YOUTUBE_CLIENT_SECRET: z.string().min(1),
   YOUTUBE_REDIRECT_URI: z.string().url(),
-  REDDIT_CLIENT_ID: z.string().min(1).optional(),
-  REDDIT_CLIENT_SECRET: z.string().min(1).optional(),
   REDDIT_USER_AGENT: z.string().min(3).default("ShortsStudio/2.0 (unified-story-automation)"),
   FRONTEND_APP_URL: z.string().url().default("http://localhost:3000"),
   AUTH_TOKEN_SECRET: z.string().min(16).default("shorts-studio-dev-auth-secret"),

@@ -100,9 +100,12 @@ export class ProjectCleanupService {
     return collapsed || "untitled";
   }
 
-  private outputBucketForProject(project: { projectType: string; facelessSource?: string }) {
+  private outputBucketForProject(project: { projectType: string; facelessSource?: string; contentType?: string }) {
     if (project.projectType === "uploaded_video") {
       return "clipping";
+    }
+    if (project.contentType === "REDDIT_STORY") {
+      return "reddit";
     }
     return "faceless_story";
   }

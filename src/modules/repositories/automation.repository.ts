@@ -11,7 +11,18 @@ export class AutomationRepository {
   }
   clearCheckpoint(projectId: string, scheduledDate: string) { return AutomationCheckpointModel.deleteOne({ projectId, scheduledDate }).exec(); }
   createHistory(input: ContentHistory) { return ContentHistoryModel.create(input); }
-  updateHistory(id: string, update: Partial<ContentHistory>) { return ContentHistoryModel.findByIdAndUpdate(id, update, { new: true }).exec(); }
+  updateHistory(id: string, update: Partial<ContentHistory>) {
+    const set: Partial<ContentHistory> = {};
+    const unset: Record<string, ""> = {};
+    for (const [key, value] of Object.entries(update)) {
+      if (value === undefined) unset[key] = "";
+      else (set as Record<string, unknown>)[key] = value;
+    }
+    const mongoUpdate: { $set?: Partial<ContentHistory>; $unset?: Record<string, ""> } = {};
+    if (Object.keys(set).length) mongoUpdate.$set = set;
+    if (Object.keys(unset).length) mongoUpdate.$unset = unset;
+    return ContentHistoryModel.findByIdAndUpdate(id, mongoUpdate, { new: true }).exec();
+  }
   findHistory(id: string) { return ContentHistoryModel.findById(id).exec(); }
   findByGenerationKey(key: string) { return ContentHistoryModel.findOne({ generationIdempotencyKey: key }).exec(); }
   findHistoryForProject(projectId: string, limit = 100) { return ContentHistoryModel.find({ projectId }).sort({ createdAt: -1 }).limit(limit).exec(); }

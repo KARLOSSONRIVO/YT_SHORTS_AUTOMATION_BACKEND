@@ -58,8 +58,8 @@ export interface Project {
   platforms: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
-  scriptFramework?: "psychology_truth" | "history_story";
-  facelessRenderMode?: "image_story" | "animation_story";
+  scriptFramework?: "psychology_truth" | "history_story" | "reddit_story";
+  facelessRenderMode?: "image_story" | "animation_story" | "background_video";
   voice?: string;
   tone?: string;
   audience?: string;
@@ -168,12 +168,12 @@ const projectSchema = new Schema<Project>(
     stylePreset: { type: String, trim: true },
     scriptFramework: {
       type: String,
-      enum: ["psychology_truth", "history_story"],
+      enum: ["psychology_truth", "history_story", "reddit_story"],
       default: "psychology_truth"
     },
     facelessRenderMode: {
       type: String,
-      enum: ["image_story", "animation_story"],
+      enum: ["image_story", "animation_story", "background_video"],
       default: "image_story"
     },
     voice: { type: String, trim: true },

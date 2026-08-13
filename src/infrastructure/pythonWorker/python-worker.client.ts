@@ -364,7 +364,8 @@ export class PythonWorkerClient {
     targetDurationSeconds?: number;
     stylePreset?: string;
     audience?: string;
-    scriptFramework?: "psychology_truth" | "history_story";
+    scriptFramework?: "psychology_truth" | "history_story" | "reddit_story";
+    sourceText?: string;
     storyFormat?: string;
     speakingRate?: number;
   }): Promise<PythonFacelessScriptResponse> {
@@ -378,8 +379,9 @@ export class PythonWorkerClient {
       target_duration_seconds: input.targetDurationSeconds,
       style_preset: input.stylePreset,
       audience: input.audience,
-      script_framework: input.scriptFramework
-      ,story_format: input.storyFormat
+      script_framework: input.scriptFramework,
+      source_text: input.sourceText,
+      story_format: input.storyFormat
       ,speaking_rate: input.speakingRate
     });
 
@@ -527,7 +529,7 @@ export class PythonWorkerClient {
     subtitlesPath?: string;
     backgroundMusicPath?: string;
     ambienceAudioPaths?: string[];
-    renderMode?: "scene_images" | "animation_story";
+    renderMode?: "scene_images" | "animation_story" | "background_video";
     musicVolume?: number;
     narrationVolume?: number;
   }): Promise<PythonFacelessRenderResponse> {

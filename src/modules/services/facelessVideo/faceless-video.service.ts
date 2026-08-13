@@ -11,6 +11,7 @@ import { JobService } from "../job/job.service";
 import { ProjectService } from "../project/project.service";
 import { QueueService } from "../queue/queue.service";
 import { isRateLimitFailure } from "../../automation/retry-policy";
+import type { ContentType } from "../../automation/automation.types";
 
 export type FacelessStage = "script" | "audio" | "subtitles" | "scenes" | "animations" | "ambience" | "render";
 
@@ -23,8 +24,8 @@ export interface CreateFacelessProjectInput {
   platforms?: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
-  scriptFramework?: "psychology_truth" | "history_story";
-  facelessRenderMode?: "image_story" | "animation_story";
+  scriptFramework?: "psychology_truth" | "history_story" | "reddit_story";
+  facelessRenderMode?: "image_story" | "animation_story" | "background_video";
   voice?: string;
   tone?: string;
   audience?: string;
@@ -32,6 +33,7 @@ export interface CreateFacelessProjectInput {
   storyFormat?: string;
   speakingRate?: number;
   fallbackVoice?: string;
+  contentType?: ContentType;
 }
 
 interface StoryStagePayload {
@@ -193,11 +195,13 @@ export class FacelessVideoService {
       speakingRate: project.speakingRate,
       targetDurationSeconds: project.targetDurationSeconds,
       stylePreset: project.stylePreset,
-      scriptFramework: this.effectiveScriptFramework(project)
+      scriptFramework: this.effectiveScriptFramework(project),
+      sourceText: project.description
     });
 
+    const scriptTitle = project.contentType === "REDDIT_STORY" ? project.title : response.title;
     const script = await this.facelessVideoRepository.upsertScript(payload.projectId, {
-      title: response.title,
+      title: scriptTitle,
       hook: response.hook,
       narration: response.narration,
       captionText: response.caption_text,
@@ -212,7 +216,7 @@ export class FacelessVideoService {
     });
 
     await this.projectService.updateProject(payload.projectId, {
-      title: response.title,
+      title: scriptTitle,
       workflowStage: "script",
       status: "writing_script"
     });
@@ -492,7 +496,7 @@ export class FacelessVideoService {
       .map((asset) => asset.absolutePath)
       .filter((assetPath): assetPath is string => typeof assetPath === "string" && assetPath.length > 0);
 
-    if (project.facelessRenderMode !== "animation_story" && imagePaths.length === 0) {
+    if (project.facelessRenderMode === "image_story" && imagePaths.length === 0) {
       throw new AppError("Scene images are required before rendering.", 409, "SCENE_IMAGES_REQUIRED");
     }
     if (project.facelessRenderMode === "animation_story" && animationPaths.length === 0) {
@@ -515,7 +519,9 @@ export class FacelessVideoService {
       audioPath: audioAsset.absolutePath,
       subtitlesPath: subtitleAsset?.absolutePath,
       ambienceAudioPaths: project.facelessRenderMode === "animation_story" ? ambiencePaths : [],
-      renderMode: project.facelessRenderMode === "animation_story" ? "animation_story" : "scene_images"
+      renderMode: project.facelessRenderMode === "background_video"
+        ? "background_video"
+        : project.facelessRenderMode === "animation_story" ? "animation_story" : "scene_images"
     });
 
     const [render, assets] = await Promise.all([
@@ -608,22 +614,27 @@ export class FacelessVideoService {
     if (stage === "scenes" && project.facelessRenderMode === "animation_story") {
       return "animations";
     }
-    if (stage === "subtitles" && project.facelessRenderMode === "animation_story") {
-      return "animations";
+    if (stage === "subtitles") {
+      if (project.facelessRenderMode === "background_video") return "render";
+      if (project.facelessRenderMode === "animation_story") return "animations";
     }
 
     return NEXT_STAGE[stage];
   }
 
   private effectiveScriptFramework(
-    project: Pick<ProjectDocument, "facelessSource" | "scriptFramework">
-  ): "psychology_truth" | "history_story" {
+    project: Pick<ProjectDocument, "facelessSource" | "scriptFramework" | "contentType">
+  ): "psychology_truth" | "history_story" | "reddit_story" {
+    if (project.contentType === "REDDIT_STORY") return "reddit_story";
     return project.scriptFramework ?? "psychology_truth";
   }
 
-  private outputBucketForProject(project: Pick<ProjectDocument, "projectType" | "facelessSource">): string {
+  private outputBucketForProject(project: Pick<ProjectDocument, "projectType" | "facelessSource" | "contentType">): string {
     if (project.projectType === "uploaded_video") {
       return "clipping";
+    }
+    if (project.contentType === "REDDIT_STORY") {
+      return "reddit";
     }
     return "faceless_story";
   }

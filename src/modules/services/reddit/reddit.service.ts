@@ -12,23 +12,33 @@ export const APPROVED_SUBREDDITS = [
 export interface RedditPost {
   id: string; subreddit: string; permalink: string; title: string; body: string; author?: string;
   createdUtc: number; score: number; comments: number; nsfw: boolean; stickied: boolean;
-  locked: boolean; removed: boolean; advertisement: boolean;
+  locked: boolean; removed: boolean; advertisement: boolean; metadataAvailable?: boolean; bodyAvailable?: boolean;
 }
 
-type RedditChild = { data?: Record<string, unknown> };
-type RedditListing = { data?: { children?: RedditChild[] } };
+type RedditRssEntry = { id: string; title: string; permalink: string; author?: string; published?: string };
 
 export class RedditApiClient {
-  private accessToken?: { value: string; expiresAt: number };
-  constructor(private readonly clientId?: string, private readonly clientSecret?: string,
-    private readonly userAgent = 'ShortsStudio/2.0', private readonly request: typeof fetch = fetch) {}
+  private static readonly BASE_URL = 'https://www.reddit.com';
+  private static readonly MIN_REQUEST_INTERVAL_MS = 1_500;
+  private static readonly MAX_RETRY_DELAY_MS = 60_000;
+  private requestQueue: Promise<void> = Promise.resolve();
+  private lastRequestAt = 0;
+  constructor(
+    private readonly userAgent = 'ShortsStudio/2.0',
+    private readonly request: typeof fetch = fetch,
+    private readonly sleep: (milliseconds: number) => Promise<void> = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+  ) {}
 
-  public configured() { return Boolean(this.clientId && this.clientSecret && this.userAgent); }
-  public async testConnection() { await this.token(); return { connected: true, officialApi: true }; }
+  public configured() { return Boolean(this.userAgent); }
+  public async testConnection() {
+    await this.getRss('/r/AskReddit/top/.rss?limit=1');
+    return { connected: true, officialApi: false, source: 'rss' };
+  }
 
   public async validateSubreddit(subreddit: string) {
-    const response = await this.get('/r/' + this.cleanSubreddit(subreddit) + '/about');
-    return { valid: Boolean((response as { data?: { display_name?: string } }).data?.display_name), subreddit: this.cleanSubreddit(subreddit) };
+    const cleanSubreddit = this.cleanSubreddit(subreddit);
+    const response = await this.getRss('/r/' + cleanSubreddit + '/hot/.rss?limit=1');
+    return { valid: /<feed(?:\s|>)/i.test(response), subreddit: cleanSubreddit };
   }
 
   public async listing(subreddit: string, sort: RedditProjectConfig['sortMethod']) {
@@ -36,44 +46,91 @@ export class RedditApiClient {
       NEW: { path: 'new' }, HOT: { path: 'hot' }, TOP_TODAY: { path: 'top', time: 'day' },
       TOP_WEEK: { path: 'top', time: 'week' }, RISING: { path: 'rising' }, BEST_ELIGIBLE: { path: 'top', time: 'day' }
     };
-    const selected = mapping[sort]; const query = new URLSearchParams({ limit: '50', raw_json: '1' });
-    if (selected.time) query.set('t', selected.time);
-    const listing = await this.get('/r/' + this.cleanSubreddit(subreddit) + '/' + selected.path + '?' + query) as RedditListing;
-    return (listing.data?.children ?? []).map((child) => this.normalize(child.data ?? {})).filter((post): post is RedditPost => Boolean(post));
+    const selected = mapping[sort]; const query = new URLSearchParams({ limit: '10' });
+    const cleanSubreddit = this.cleanSubreddit(subreddit);
+    const feed = await this.getRss('/r/' + cleanSubreddit + '/' + selected.path + '/.rss?' + query);
+    return this.parseRss(feed).map((entry) => this.normalizeRssEntry(entry, cleanSubreddit)).filter((post): post is RedditPost => Boolean(post));
   }
 
-  private async get(path: string) {
-    const token = await this.token();
-    const response = await this.fetchWithRetry('https://oauth.reddit.com' + path, {
-      headers: { Authorization: 'Bearer ' + token, 'User-Agent': this.userAgent, Accept: 'application/json' }
+  private async getRss(path: string) {
+    const response = await this.fetchWithRetry(RedditApiClient.BASE_URL + path, {
+      headers: { 'User-Agent': this.userAgent, Accept: 'application/atom+xml, application/rss+xml' }
     });
-    if (!response.ok) throw new AppError('Reddit API request failed with status ' + response.status + '.', 502, 'REDDIT_API_FAILED');
-    return response.json();
-  }
-
-  private async token() {
-    if (this.accessToken && this.accessToken.expiresAt > Date.now() + 30_000) return this.accessToken.value;
-    if (!this.clientId || !this.clientSecret) throw new AppError('Reddit API credentials are not configured.', 503, 'REDDIT_NOT_CONFIGURED');
-    const basic = Buffer.from(this.clientId + ':' + this.clientSecret).toString('base64');
-    const response = await this.fetchWithRetry('https://www.reddit.com/api/v1/access_token', {
-      method: 'POST', headers: { Authorization: 'Basic ' + basic, 'User-Agent': this.userAgent, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'grant_type=client_credentials'
-    });
-    if (!response.ok) throw new AppError('Reddit authentication failed.', 502, 'REDDIT_AUTH_FAILED');
-    const body = await response.json() as { access_token?: string; expires_in?: number };
-    if (!body.access_token) throw new AppError('Reddit authentication returned no access token.', 502, 'REDDIT_AUTH_FAILED');
-    this.accessToken = { value: body.access_token, expiresAt: Date.now() + (body.expires_in ?? 3600) * 1000 };
-    return body.access_token;
+    if (!response.ok) throw new AppError('Reddit RSS fetch failed with status ' + response.status + '.', 502, 'REDDIT_API_FAILED');
+    return response.text();
   }
 
   private cleanSubreddit(value: string) { return value.trim().replace(/^r\//i, ''); }
   private async fetchWithRetry(url: string, init: RequestInit) {
     let response: Response | undefined;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      response = await this.request(url, init);
+      response = await this.requestOnce(url, init, attempt === 0);
       if (response.status !== 429 && response.status < 500) return response;
+      if (attempt < 2) await this.sleep(this.retryDelayMs(response, attempt));
     }
     return response!;
+  }
+  private async requestOnce(url: string, init: RequestInit, enforceInterval: boolean) {
+    let release!: () => void;
+    const turn = new Promise<void>((resolve) => { release = resolve; });
+    const previous = this.requestQueue;
+    this.requestQueue = turn;
+    await previous;
+    try {
+      if (enforceInterval) {
+        const wait = Math.max(0, this.lastRequestAt + RedditApiClient.MIN_REQUEST_INTERVAL_MS - Date.now());
+        if (wait > 0) await this.sleep(wait);
+      }
+      this.lastRequestAt = Date.now();
+      return await this.request(url, init);
+    } finally {
+      release();
+    }
+  }
+  private retryDelayMs(response: Response, attempt: number) {
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter) {
+      const seconds = Number(retryAfter);
+      if (Number.isFinite(seconds)) return Math.min(RedditApiClient.MAX_RETRY_DELAY_MS, Math.max(1_000, seconds * 1_000));
+      const timestamp = Date.parse(retryAfter);
+      if (Number.isFinite(timestamp)) return Math.min(RedditApiClient.MAX_RETRY_DELAY_MS, Math.max(1_000, timestamp - Date.now()));
+    }
+    const resetSeconds = Number(response.headers.get('x-ratelimit-reset'));
+    if (Number.isFinite(resetSeconds) && resetSeconds > 0) {
+      return Math.min(RedditApiClient.MAX_RETRY_DELAY_MS, Math.max(1_000, resetSeconds * 1_000));
+    }
+    return Math.min(RedditApiClient.MAX_RETRY_DELAY_MS, 2_500 * (2 ** attempt));
+  }
+  private parseRss(xml: string): RedditRssEntry[] {
+    return [...xml.matchAll(/<entry(?:\s[^>]*)?>([\s\S]*?)<\/entry>/gi)].map((match) => {
+      const entry = match[1];
+      const link = /<link\s+[^>]*href=["']([^"']+)["'][^>]*\/?>/i.exec(entry)?.[1] ?? '';
+      const author = /<author>[\s\S]*?<name>([\s\S]*?)<\/name>[\s\S]*?<\/author>/i.exec(entry)?.[1];
+      return {
+        id: this.xmlText(/<id>([\s\S]*?)<\/id>/i.exec(entry)?.[1] ?? ''),
+        title: this.xmlText(/<title>([\s\S]*?)<\/title>/i.exec(entry)?.[1] ?? ''),
+        permalink: this.xmlText(link),
+        author: author ? this.xmlText(author) : undefined,
+        published: this.xmlText(/<(?:published|updated)>([\s\S]*?)<\/(?:published|updated)>/i.exec(entry)?.[1] ?? '')
+      };
+    }).filter((entry) => Boolean(entry.id && entry.title && entry.permalink));
+  }
+  private xmlText(value: string) {
+    return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, ' ')
+      .replace(/&#(x[\da-f]+|\d+);/gi, (_, code: string) => String.fromCodePoint(code[0].toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : Number(code)))
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+      .replace(/\s+/g, ' ').trim();
+  }
+  private normalizeRssEntry(entry: RedditRssEntry, fallbackSubreddit: string): RedditPost | null {
+    const id = entry.id.replace(/^t3_/i, '').trim();
+    const title = entry.title.trim();
+    if (!id || !title || !entry.permalink) return null;
+    return {
+      id, subreddit: fallbackSubreddit, permalink: entry.permalink, title, body: title, author: entry.author,
+      createdUtc: entry.published ? Math.floor(new Date(entry.published).getTime() / 1000) : 0,
+      score: 0, comments: 0, nsfw: false, stickied: false, locked: false, removed: false, advertisement: false,
+      metadataAvailable: false, bodyAvailable: false
+    };
   }
   private normalize(data: Record<string, unknown>): RedditPost | null {
     const body = String(data.selftext ?? '').trim();
@@ -83,7 +140,8 @@ export class RedditApiClient {
       title: String(data.title).trim(), body, author: data.author ? String(data.author) : undefined,
       createdUtc: Number(data.created_utc ?? 0), score: Number(data.score ?? 0), comments: Number(data.num_comments ?? 0),
       nsfw: Boolean(data.over_18), stickied: Boolean(data.stickied), locked: Boolean(data.locked),
-      removed: body === '[removed]' || body === '[deleted]', advertisement: Boolean(data.promoted)
+      removed: body === '[removed]' || body === '[deleted]', advertisement: Boolean(data.promoted),
+      metadataAvailable: true, bodyAvailable: true
     };
   }
 }
@@ -134,9 +192,12 @@ export class RedditService {
 
   public toCandidate(post: RedditPost, sanitized = this.sanitize(post.title + '. ' + post.body)): TopicCandidate {
     const words = sanitized.split(/\s+/).slice(0, 170).join(' ');
+    const summary = post.bodyAvailable === false
+      ? 'A Reddit RSS entry was found with this title, but the feed did not include the original post body: ' + this.sanitize(post.title)
+      : 'A Reddit user submitted this personal account: ' + words;
     return {
       topic: 'Reddit submission from r/' + post.subreddit, title: this.sanitize(post.title).slice(0, 100),
-      summary: 'A Reddit user submitted this personal account: ' + words, storyAngle: 'Retell as an anonymized, unverified personal account',
+      summary, storyAngle: 'Retell as an anonymized, unverified personal account',
       importantEntities: [], dates: [], events: [], keywords: post.title.toLowerCase().split(/\W+/).filter((word) => word.length > 4).slice(0, 10),
       sourceLinks: [post.permalink], disputedFacts: ['This is a Reddit submission and is not independently verified.'],
       factualConfidence: 0.5, scores: {
@@ -159,8 +220,8 @@ export class RedditService {
       const hash = this.hash(this.normalize(this.sanitize(post.title + ' ' + post.body)));
       const normalized = this.normalize(this.sanitize(post.title + ' ' + post.body));
       return !post.stickied && !post.advertisement && !post.removed && (!config.excludeLocked || !post.locked) &&
-        (config.allowNSFW || !post.nsfw) && post.score >= config.minimumScore && post.comments >= config.minimumComments &&
-        post.body.length >= config.minimumBodyLength && !usedIds.has(post.id) && !usedLinks.has(post.permalink) &&
+        (config.allowNSFW || !post.nsfw) && (post.metadataAvailable === false || (post.score >= config.minimumScore && post.comments >= config.minimumComments)) &&
+        (post.bodyAvailable === false || post.body.length >= config.minimumBodyLength) && !usedIds.has(post.id) && !usedLinks.has(post.permalink) &&
         !usedHashes.has(hash) && !(used.texts??[]).some((text)=>this.similarity(normalized, this.normalize(text)) >= 0.82) &&
         !this.unsafe(post.title + ' ' + post.body);
     }).sort((a, b) => this.score(b) - this.score(a));
@@ -168,7 +229,16 @@ export class RedditService {
 
   private async eligible(config: RedditProjectConfig) {
     const subreddits = config.sourceMode === 'AUTO' || !config.subreddits.length ? [...APPROVED_SUBREDDITS] : config.subreddits;
-    const batches = await Promise.all(subreddits.map((subreddit) => this.api.listing(subreddit, config.sortMethod)));
+    const batches: RedditPost[][] = [];
+    let firstFetchError: unknown;
+    for (const subreddit of subreddits) {
+      try {
+        batches.push(await this.api.listing(subreddit, config.sortMethod));
+      } catch (error) {
+        firstFetchError ??= error;
+      }
+    }
+    if (batches.length === 0 && firstFetchError) throw firstFetchError;
     const prior = await RedditSourceModel.find({}, { redditPostId: 1, permalink: 1, contentHash: 1, originalTitle: 1, summary: 1 }).lean().exec();
     const usedIds = new Set(prior.map((item) => item.redditPostId)); const usedLinks = new Set(prior.map((item) => item.permalink));
     const usedHashes = new Set(prior.map((item) => item.contentHash));

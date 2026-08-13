@@ -21,8 +21,8 @@ export interface CreateFacelessStoryProjectInput {
   platforms?: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
-  scriptFramework?: "psychology_truth" | "history_story";
-  facelessRenderMode?: "image_story" | "animation_story";
+  scriptFramework?: "psychology_truth" | "history_story" | "reddit_story";
+  facelessRenderMode?: "image_story" | "animation_story" | "background_video";
   voice?: string;
   tone?: string;
   audience?: string;
@@ -30,6 +30,7 @@ export interface CreateFacelessStoryProjectInput {
   storyFormat?: string;
   speakingRate?: number;
   fallbackVoice?: string;
+  contentType?: ContentType;
   subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
 }
 
@@ -108,7 +109,7 @@ export class ProjectService {
       title: input.title ?? input.topic,
       description: input.description,
       projectType: "faceless_story",
-      contentType: "FACELESS_NICHE",
+      contentType: input.contentType ?? "FACELESS_NICHE",
       facelessSource: "daily_automation",
       topic: input.topic,
       platforms: input.platforms ?? ["youtube"],
