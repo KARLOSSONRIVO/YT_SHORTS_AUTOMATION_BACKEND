@@ -1,9 +1,11 @@
+name: yt_backend
+
 services:
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: yt-shorts-backend
+    container_name: Yt_BACKEND
     restart: unless-stopped
     env_file:
       - .env

@@ -27,7 +27,7 @@ const envSchema = z.object({
   GROQ_API_KEY: z.string().min(1).optional(),
   GROQ_TOPIC_RESEARCH_MODEL: z.string().default("groq/compound-mini"),
   GROQ_TOPIC_RESEARCH_FALLBACK_MODEL: z.string().default("qwen/qwen3.6-27b"),
-  GROQ_TOPIC_RESEARCH_SECONDARY_FALLBACK_MODEL: z.string().default("llama-3.1-8b-instant"),
+  GROQ_TOPIC_RESEARCH_SECONDARY_FALLBACK_MODEL: z.string().default("openai/gpt-oss-20b"),
   GROQ_API_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
   AUTOMATION_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(10000).default(60000)
 });

@@ -20,7 +20,13 @@ export const providerRetryDelayMs = (attempt: number, error?: unknown) => {
   const details = error instanceof AppError && typeof error.details === "object" && error.details
     ? error.details as { retryAfter?: unknown }
     : undefined;
-  const retryAfterSeconds = Number(details?.retryAfter);
+  const responseHeaders = typeof error === "object" && error && "response" in error
+    ? (error as { response?: { headers?: Record<string, unknown> & { get?: (name: string) => unknown } } }).response?.headers
+    : undefined;
+  const retryAfter = details?.retryAfter
+    ?? responseHeaders?.["retry-after"]
+    ?? responseHeaders?.get?.("retry-after");
+  const retryAfterSeconds = Number(retryAfter);
   if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) return Math.ceil(retryAfterSeconds * 1000);
   return [30_000, 60_000, 120_000][Math.min(Math.max(attempt - 1, 0), 2)];
 };
