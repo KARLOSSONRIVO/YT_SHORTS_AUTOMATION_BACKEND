@@ -33,6 +33,24 @@ const candidate: TopicCandidate={topic:"The runner who broke the world record",t
 
 test("duration targets sixty seconds by speaking rate",()=>{const d=new DurationValidator();assert.deepEqual(d.targetWordRange(60,150),{min:138,target:150,max:162});assert.equal(d.validate(Array(150).fill("word").join(" "),60,150).valid,true)});
 test("clearing a story error unsets the persisted fields",async()=>{let captured:unknown;const update=mock.method(ContentHistoryModel,"findByIdAndUpdate",(_id:string,changes:unknown)=>{captured=changes;return{exec:async()=>null} as never});try{await new AutomationRepository().updateHistory("story-1",{status:"rendering",lastError:undefined,nextRetryAt:undefined});assert.deepEqual(captured,{$set:{status:"rendering"},$unset:{lastError:"",nextRetryAt:""}})}finally{update.mock.restore()}});
+test("scheduled stories can be uploaded immediately through the project action",async()=>{
+  const updates:Array<Record<string,unknown>>=[];
+  let claimed=false;
+  const content={id:"story-scheduled",projectId:"p1",renderProjectId:"render-1",accountId:"a1",status:"scheduled",scheduledUploadTime:new Date(Date.now()+3600000),uploadAttempts:0,nicheId:"sports",topic:"Topic",title:"Title",summary:"Summary",storyAngle:"Angle",importantEntities:[],dates:[],events:[],keywords:[],sourceLinks:["https://example.org/source"],targetDurationSeconds:60,contentEmbedding:[],generationAttempts:0,generationIdempotencyKey:"p1:2026-08-20:FACELESS_GENERATION",metadata:{}};
+  const project={id:"p1",_id:"p1",userId:"u1",internalStory:false,projectType:"faceless_story",facelessSource:"daily_automation",contentType:"FACELESS_NICHE",nicheId:"sports",accountId:"a1",timezone:"Asia/Manila",uploadTime:"19:00",language:"en",automationMode:"fully_automatic",automationEnabled:true};
+  const repository={findHistory:async()=>content,updateHistory:async(_id:string,input:Record<string,unknown>)=>{updates.push(input);return{...content,...input}},countUploadedSince:async()=>0,claimUpload:async()=>{claimed=true;return content},logActivity:async()=>({}),clearCheckpoint:async()=>({})};
+  const projects={getOwnedProjectOrThrow:async()=>project,getProjectOrThrow:async()=>project,updateProject:async()=>project};
+  const channels={findById:async()=>({id:"a1",title:"Channel",status:"connected",refreshToken:"refresh"})};
+  const assets={findLatestAssetByType:async()=>({absolutePath:"C:/tmp/final-video.mp4"}),findAssets:async()=>[]};
+  const publisher={publishFacelessProjectNow:async(input:Record<string,unknown>)=>{assert.equal(input.projectId,"render-1");assert.equal(input.channelId,"a1");assert.equal(input.title,"Title");assert.match(String(input.description),/^Summary/);assert.equal(input.privacyStatus,"public");return{youtubeVideoId:"yt-1",videoUrl:"https://youtube.example/yt-1"}}};
+  const inspection={inspect:async()=>({durationSeconds:60,width:1080,height:1920,hasAudio:true,blankSceneCount:0,unauthorizedWatermark:false})};
+  const service=new AutomationService(repository as never,new NicheConfigService(),{} as never,channels as never,{} as never,projects as never,assets as never,publisher as never,{} as never,inspection as never);
+  const result=await service.uploadNow("u1","p1","story-scheduled");
+  assert.equal(result?.status,"uploaded");
+  assert.equal(claimed,true);
+  assert.ok(updates.some((input)=>input.status==="uploaded"));
+});
+
 test("successful story upload clears the previous error",async()=>{
   const updates:Array<Record<string,unknown>>=[];
   const content={id:"story-1",projectId:"p1",renderProjectId:"render-1",accountId:"a1",status:"awaiting_approval",uploadAttempts:0,nicheId:"sports",topic:"Topic",title:"Title",summary:"Summary",storyAngle:"Angle",importantEntities:[],dates:[],events:[],keywords:[],sourceLinks:["https://example.org/source"],targetDurationSeconds:60,contentEmbedding:[],generationAttempts:0,generationIdempotencyKey:"p1:2026-08-12:FACELESS_GENERATION",metadata:{}};
@@ -99,7 +117,43 @@ test("QC allows a valid render without quality warnings",()=>{
 test("retry delay is exponential and capped",()=>{assert.equal(retryDelayMs(1),5000);assert.equal(retryDelayMs(20),300000)});
 test("niche selection loads all editable profiles and 60-second default",()=>{const config=new NicheConfigService();assert.equal(config.listNiches().length,7);assert.equal(config.getNicheOrThrow("philippine_history").region,"PH");assert.equal(config.getDefaults().targetDurationSeconds,60)});
 test("daily scheduler respects configured active days",()=>{const next=new ScheduleService().nextRun("Asia/Manila","19:00",[1],new Date("2026-07-13T12:00:00Z"));assert.equal(next.getUTCDay(),1);assert.ok(next>new Date("2026-07-13T12:00:00Z"))});
-test("topic rotation blocks a recently repeated entity",()=>{const history=[{importantEntities:["Michael Jordan"],storyFormat:"hero_story"} as never];assert.ok(new TopicRotationService().violations({...candidate,importantEntities:["Michael Jordan"]},history).length>0)});
+test("topic rotation allows shared supporting entities but blocks a repeated primary subject",()=>{
+  const history=[{importantEntities:["Mariano Alvarez","Katipunan","Philippine Revolution"],storyFormat:"hero_story"} as never];
+  const rotation=new TopicRotationService();
+  assert.deepEqual(rotation.violations({...candidate,importantEntities:["Apolinario Mabini","Philippine Revolution","Emilio Aguinaldo"]},history),[]);
+  assert.ok(rotation.violations({...candidate,importantEntities:["Mariano Alvarez","Katipunan"]},history).includes("recent subject rotation: mariano alvarez"));
+});
+test("all rejected checkpoint candidates trigger one fresh research attempt",async()=>{
+  const staleCandidate={...candidate,topic:"Mariano Alvarez topic",title:"Mariano Alvarez",importantEntities:["Mariano Alvarez","Philippine Revolution"]};
+  const freshCandidate={...candidate,topic:"Apolinario Mabini topic",title:"Apolinario Mabini",importantEntities:["Apolinario Mabini","Philippine Revolution"]};
+  const history=[{id:"history-1",topic:"Mariano Alvarez",title:"Mariano Alvarez",normalizedTopic:"mariano alvarez",keywords:[],importantEntities:["Mariano Alvarez","Katipunan"],events:[],storyAngle:"hero story",storyFormat:"hero_story",contentEmbedding:[]}];
+  const project={id:"project-1",_id:"project-1",userId:"user-1",internalStory:false,projectType:"faceless_story",facelessSource:"daily_automation",contentType:"FACELESS_NICHE",nicheId:"sports",accountId:"account-1",timezone:"Asia/Manila",uploadTime:"19:00",language:"en",durationSeconds:60,automationMode:"fully_automatic",automationEnabled:true,visualType:"AUTO"};
+  const voice={id:"voice-1",provider:"test",languages:["en"],gender:"neutral",traits:["energetic"],energy:.9,speed:1.08,intensity:.8,accents:[],costPerMillionCharactersUsd:0,dailyUsageLimit:null,priority:1,enabled:true};
+  let researchCalls=0;
+  let clearedCheckpoint=false;
+  let savedCandidates:TopicCandidate[]|undefined;
+  const repository={
+    findByGenerationKey:async()=>null,
+    findComparisonHistory:async()=>history,
+    findCheckpoint:async()=>({researchCandidates:[staleCandidate]}),
+    clearCheckpoint:async()=>{clearedCheckpoint=true;return{}},
+    saveResearchCheckpoint:async(_projectId:string,_date:string,candidates:TopicCandidate[])=>{savedCandidates=candidates;return{}},
+    createRejected:async()=>({}),
+    createHistory:async(input:Record<string,unknown>)=>({id:"history-new",...input}),
+    logActivity:async()=>({})
+  };
+  const config={getPersistentNicheOrThrow:async()=>({...profile,visualPreferences:["sports"]}),getDefaults:()=>({similarityThreshold:.78}),listVoices:()=>[voice]};
+  const research={generate:async()=>{researchCalls+=1;return[ freshCandidate ]}};
+  const channels={findById:async()=>({id:"account-1",title:"Channel",status:"connected",refreshToken:"refresh"})};
+  const projects={getProjectOrThrow:async()=>project,updateProject:async()=>project};
+  const faceless={createGeneratedStoryProject:async()=>({id:"render-1",_id:"render-1"}),startAutomation:async()=>({})};
+  const service=new AutomationService(repository as never,config as never,research as never,channels as never,faceless as never,projects as never,{} as never,{} as never,{} as never,{} as never);
+  const result=await service.execute("project-1","2026-08-21");
+  assert.equal(result.topic,"Apolinario Mabini topic");
+  assert.equal(researchCalls,1);
+  assert.equal(clearedCheckpoint,true);
+  assert.deepEqual(savedCandidates,[freshCandidate]);
+});
 test("publishing modes require an intentional choice",()=>assert.deepEqual(AUTOMATION_MODES,["fully_automatic","approval_before_upload","draft_only"]));
 test("unified content and visual registries contain every supported mode",()=>{assert.deepEqual(CONTENT_TYPES,["FACELESS_NICHE","REDDIT_STORY","CLIP_UPLOAD"]);assert.deepEqual(VISUAL_TYPES,["IMAGE","ANIMATED","AUTO"])});
 test("final research fallback preserves safe Groq quota details for queue retry",async()=>{const post=mock.method(axios,"post",async()=>{throw{isAxiosError:true,message:"Request failed with status code 429",response:{status:429,data:{error:{message:"Rate limit reached",code:"rate_limit_exceeded"}},headers:{"retry-after":"75","x-ratelimit-limit-requests":"250","x-ratelimit-remaining-requests":"241","x-ratelimit-reset-requests":"51m","x-ratelimit-limit-tokens":"70000","x-ratelimit-remaining-tokens":"1200","x-ratelimit-reset-tokens":"48s"}}}});try{const service=new TopicResearchService("test-key","groq/compound-mini","https://api.groq.test/openai/v1",["qwen/qwen3.6-27b","openai/gpt-oss-20b"]);await assert.rejects(()=>service.generate({profile,language:"en",region:"US",recentTopics:[],recentEntities:[]}),error=>{assert.ok(error instanceof AppError);assert.equal(error.code,"GROQ_RATE_LIMITED");assert.match(error.message,/Automatic retries/);assert.deepEqual(error.details,{provider:"groq",providerCode:"rate_limit_exceeded",providerMessage:"Rate limit reached",retryAfter:"75",limitRequests:"250",remainingRequests:"241",resetRequests:"51m",limitTokens:"70000",remainingTokens:"1200",resetTokens:"48s"});return true});assert.equal(post.mock.callCount(),3)}finally{post.mock.restore()}});
@@ -155,7 +209,7 @@ test("duration validation requests safe expansion and shortening",()=>{const val
 test("temporary failures retry while permanent validation errors stop",()=>{assert.equal(isTemporaryFailure(new AppError("rate",429,"RATE_LIMITED")),true);assert.equal(isTemporaryFailure(new AppError("bad",422,"INVALID")),false)});
 test("provider HTTP 429 is treated as a rate limit",()=>{assert.equal(isRateLimitFailure(new AppError("rate",429,"RATE_LIMITED")),true);assert.equal(isRateLimitFailure(new AppError("queued",429,"AUTOMATION_JOB_QUEUED")),false);assert.equal(isQueuedWorkflowFailure(new AppError("queued",429,"AUTOMATION_JOB_QUEUED")),true);assert.equal(isRateLimitFailure(new AppError("server",503,"UPSTREAM")),false)});
 test("the active-story coordinator queues a second project",async()=>{let value:string|null=null;const redis={set:async(_key:string,next:string)=>{if(value)return null;value=next;return"OK"},get:async()=>value,eval:async(script:string)=>{if(script.includes("expire"))return 0;value=null;return 1}};const coordinator=new AutomationRunCoordinator(redis as never);await coordinator.begin("p1","p1:2026-07-14:FACELESS_GENERATION");await assert.rejects(()=>coordinator.begin("p2","p2:2026-07-14:FACELESS_GENERATION"),error=>error instanceof AppError&&error.code==="AUTOMATION_JOB_QUEUED");await coordinator.finish("p1");await coordinator.begin("p2","p2:2026-07-14:FACELESS_GENERATION")});
-test("legacy entry points are removed and unified project APIs are registered",()=>{const handler=(_request?:unknown,_response?:unknown,next?:()=>void)=>next?.();const controller=new Proxy({}, {get:()=>handler}) as never;const router=createProjectRoutes(controller) as unknown as {stack:Array<{route?:{path:string}}>};const paths=router.stack.flatMap((layer)=>layer.route?[layer.route.path]:[]);for(const removed of ["/reddit/trending","/:projectId/run","/:projectId/generate-script","/:projectId/generate-audio","/:projectId/generate-scenes","/:projectId/render","/:projectId/publish"])assert.equal(paths.includes(removed),false);for(const expected of ["/niches","/niches/seed","/reddit/validate","/:projectId/reddit/fetch-now","/:projectId/clips","/:projectId/clips/:clipId/upload-now"])assert.ok(paths.includes(expected),expected)});
+test("legacy entry points are removed and unified project APIs are registered",()=>{const handler=(_request?:unknown,_response?:unknown,next?:()=>void)=>next?.();const controller=new Proxy({}, {get:()=>handler}) as never;const router=createProjectRoutes(controller) as unknown as {stack:Array<{route?:{path:string}}>};const paths=router.stack.flatMap((layer)=>layer.route?[layer.route.path]:[]);for(const removed of ["/reddit/trending","/:projectId/run","/:projectId/generate-script","/:projectId/generate-audio","/:projectId/generate-scenes","/:projectId/render","/:projectId/publish"])assert.equal(paths.includes(removed),false);for(const expected of ["/niches","/niches/seed","/reddit/validate","/:projectId/reddit/fetch-now","/:projectId/clips","/:projectId/clips/:clipId/upload-now","/:projectId/stories/:storyId/upload-now"])assert.ok(paths.includes(expected),expected)});
 test("migration preserves history and archives the obsolete profile collection",()=>{const migration=fs.readFileSync(new URL("../src/migrations/20260713-unify-project-automation.ts",import.meta.url),"utf8");assert.match(migration,/renderProjectId/);assert.match(migration,/legacy_nicheautomations_archived_20260713/);assert.doesNotMatch(migration,/platformVideoId\s*:/);assert.doesNotMatch(migration,/deleteMany\(\{\}\)/)});
 
 test("project creation validates the account and persists the unified settings",async()=>{let saved:Record<string,unknown>|undefined;const repository={logActivity:async()=>({})};const projects={createAutomationProject:async(input:Record<string,unknown>)=>{saved=input;return{_id:"p1",id:"p1",userId:"u1"}}};const channels={findByIdAndUserId:async()=>({id:"a1",title:"Channel",externalChannelId:"youtube-1",status:"connected",refreshToken:"refresh"})};const service=new AutomationService(repository as never,new NicheConfigService(),{} as never,channels as never,{} as never,projects as never,{} as never,{} as never,{} as never,{} as never);await service.createProject("u1",validProject as never);assert.equal(saved?.name,"Daily History");assert.equal(saved?.accountId,"account-1");assert.equal(saved?.automationMode,"approval_before_upload");assert.ok(saved?.nextRunAt instanceof Date)});
@@ -215,7 +269,24 @@ const redditPost=(overrides:Partial<RedditPost>={}):RedditPost=>({id:"post-1",su
 test("Reddit ranking filters deleted, pinned, NSFW, locked, and duplicate posts",()=>{const service=new RedditService({} as never);const posts=[redditPost(),redditPost({id:"deleted",removed:true}),redditPost({id:"pinned",stickied:true}),redditPost({id:"nsfw",nsfw:true}),redditPost({id:"locked",locked:true}),redditPost({id:"duplicate"})];const result=service.filterAndRank(posts,redditConfig,{ids:new Set(["duplicate"])});assert.deepEqual(result.map((item)=>item.id),["post-1"])});
 test("RSS posts remain eligible when score, comments, and body are unavailable",()=>{const service=new RedditService({} as never);const result=service.filterAndRank([redditPost({body:"RSS title only",score:0,comments:0,metadataAvailable:false,bodyAvailable:false})],redditConfig);assert.equal(result.length,1)});
 test("Reddit transformation anonymizes PII and labels claims as submissions",()=>{const service=new RedditService({} as never);const text=service.sanitize("u/realperson wrote real@example.com and +1 555 123 4567");assert.doesNotMatch(text,/realperson|real@example|555/);assert.match(service.toCandidate(redditPost()).summary,/Reddit user submitted/)});
+test("Reddit candidate topics include the post title",()=>{const service=new RedditService({} as never);const first=service.toCandidate(redditPost({id:"post-1",title:"A different personal story"}));const second=service.toCandidate(redditPost({id:"post-2",title:"Another personal story"}));assert.notEqual(first.topic,second.topic);assert.match(first.topic,/A different personal story/)});
 test("Reddit content hashes and source IDs are protected by unique indexes",()=>{const serialized=JSON.stringify(RedditSourceModel.schema.indexes());assert.match(serialized,/redditPostId/);assert.match(serialized,/permalink/);assert.match(serialized,/contentHash/)});
+
+test("failed Reddit uniqueness checks reject the reserved source with the reason",async()=>{
+  let sourceUpdate:Record<string,unknown>|undefined;
+  const redditCandidate={...candidate,topic:"Reddit submission from r/AskReddit",title:"What unexpected secret did you discover?",summary:"A Reddit user submitted a personal account.",storyAngle:"Retell as an anonymized, unverified personal account",importantEntities:[],events:[],keywords:["unexpected","secret"]};
+  const history=[{id:"history-r",topic:redditCandidate.topic,normalizedTopic:"reddit submission from r askreddit",title:"Older Reddit post",summary:"Older",storyAngle:redditCandidate.storyAngle,importantEntities:[],events:[],keywords:[],storyFormat:"hero_story",contentEmbedding:[]}];
+  const project={id:"reddit-project",_id:"reddit-project",userId:"u1",projectType:"faceless_story",contentType:"REDDIT_STORY",visualType:"ANIMATED",facelessSource:"daily_automation",internalStory:false,accountId:"a1",timezone:"Asia/Manila",uploadTime:"19:00",language:"en",durationSeconds:60,automationMode:"approval_before_upload"};
+  const repository={findByGenerationKey:async()=>null,findComparisonHistory:async()=>history,createRejected:async()=>({}),logActivity:async()=>({})};
+  const projects={getProjectOrThrow:async()=>project,updateProject:async()=>project};
+  const channels={findById:async()=>({id:"a1",title:"Reddit Channel",status:"connected",refreshToken:"refresh"})};
+  const reddit={select:async()=>({candidate:redditCandidate,record:{id:"source-r",updateOne:async(input:Record<string,unknown>)=>{sourceUpdate=input;return{}}},post:{subreddit:"AskReddit",title:redditCandidate.title}})};
+  const config={getPersistentNicheOrThrow:async()=>profile,getDefaults:()=>({similarityThreshold:.78}),listVoices:()=>[]};
+  const service=new AutomationService(repository as never,config as never,{} as never,channels as never,{} as never,projects as never,{} as never,{} as never,{} as never,{} as never,reddit as never);
+  await assert.rejects(()=>service.execute("reddit-project","2026-07-13"),error=>error instanceof AppError&&error.code==="NO_UNIQUE_TOPICS");
+  assert.equal(sourceUpdate?.status,"rejected");
+  assert.match(String(sourceUpdate?.rejectionReason),/exact title or normalized topic/);
+});
 
 test("clip file and media validation rejects unsupported or corrupt input",()=>{assert.equal(isSupportedClipMime("video/mp4"),true);assert.equal(isSupportedClipMime("text/plain"),false);assert.equal(validateClipMedia({durationSeconds:60,width:1080,height:1920,hasAudio:true}),true);assert.equal(validateClipMedia({durationSeconds:0,width:1080,height:1920,hasAudio:true}),false);assert.equal(validateClipMedia({durationSeconds:60,width:1080,height:1920,hasAudio:false}),false)});
 test("clip upload idempotency is stable and account-specific",()=>{assert.equal(clipUploadIdempotencyKey("clip","account"),"clip:account:CLIP_UPLOAD");assert.notEqual(clipUploadIdempotencyKey("clip","a"),clipUploadIdempotencyKey("clip","b"))});

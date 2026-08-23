@@ -191,12 +191,13 @@ export class RedditService {
   }
 
   public toCandidate(post: RedditPost, sanitized = this.sanitize(post.title + '. ' + post.body)): TopicCandidate {
+    const title = this.sanitize(post.title).slice(0, 100);
     const words = sanitized.split(/\s+/).slice(0, 170).join(' ');
     const summary = post.bodyAvailable === false
       ? 'A Reddit RSS entry was found with this title, but the feed did not include the original post body: ' + this.sanitize(post.title)
       : 'A Reddit user submitted this personal account: ' + words;
     return {
-      topic: 'Reddit submission from r/' + post.subreddit, title: this.sanitize(post.title).slice(0, 100),
+      topic: 'Reddit submission from r/' + post.subreddit + ': ' + title, title,
       summary, storyAngle: 'Retell as an anonymized, unverified personal account',
       importantEntities: [], dates: [], events: [], keywords: post.title.toLowerCase().split(/\W+/).filter((word) => word.length > 4).slice(0, 10),
       sourceLinks: [post.permalink], disputedFacts: ['This is a Reddit submission and is not independently verified.'],

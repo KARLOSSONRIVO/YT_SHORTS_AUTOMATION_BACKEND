@@ -171,12 +171,34 @@ export class AutomationService {
       throw new AppError("Reddit automation is unavailable.", 503, "REDDIT_NOT_CONFIGURED");
     const checkpoint = await this.repository.findCheckpoint?.(projectId, date);
     let candidates = redditSelection ? [redditSelection.candidate] : checkpoint?.researchCandidates;
-    if (!candidates?.length) {
-      candidates = await this.research.generate({ profile, language: project.language!, region: profile.region,
+    const generateCandidates = async (): Promise<TopicCandidate[]> => {
+      const generated = await this.research.generate({ profile, language: project.language!, region: profile.region,
         recentTopics: history.map((item) => item.topic), recentEntities: history.flatMap((item) => item.importantEntities) });
-      await this.repository.saveResearchCheckpoint?.(projectId, date, candidates);
+      candidates = generated;
+      await this.repository.saveResearchCheckpoint?.(projectId, date, generated);
+      return generated;
+    };
+    if (!candidates?.length) {
+      await generateCandidates();
     }
-    const selected = await this.chooseCandidate(project, candidates, history);
+    let selected: TopicCandidate;
+    try {
+      selected = await this.chooseCandidate(project, candidates ?? [], history);
+    } catch (error) {
+      if (redditSelection && error instanceof AppError && error.code === "NO_UNIQUE_TOPICS") {
+        const details = error.details as { reasons?: unknown } | undefined;
+        const reasons = Array.isArray(details?.reasons) ? details.reasons.filter((reason): reason is string => typeof reason === "string") : [];
+        await redditSelection.record.updateOne({ status: "rejected", rejectionReason: reasons.length ? [...new Set(reasons)].join("; ") : error.message });
+        throw error;
+      }
+      if (!redditSelection && error instanceof AppError && error.code === "NO_UNIQUE_TOPICS") {
+        await this.repository.clearCheckpoint?.(projectId, date);
+        const refreshedCandidates = await generateCandidates();
+        selected = await this.chooseCandidate(project, refreshedCandidates, history);
+      } else {
+        throw error;
+      }
+    }
     const storyFormat = this.formats.select(profile, selected, { mode: "auto_select", allowed: project.allowedStoryFormats });
     const voice = this.voices.select(profile, this.config.listVoices(), storyFormat, project.language!);
     if (redditSelection) await this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "reddit_source_selected", severity: "info",
@@ -256,6 +278,14 @@ export class AutomationService {
     await this.ownedProject(userId, projectId);
     const content = await this.ownedContent(projectId, contentId);
     if (content.status !== "awaiting_approval") throw new AppError("Story is not waiting for approval.", 409, "CONTENT_NOT_AWAITING_APPROVAL");
+    return this.upload(content.id);
+  }
+
+  public async uploadNow(userId: string, projectId: string, contentId: string) {
+    await this.ownedProject(userId, projectId);
+    const content = await this.ownedContent(projectId, contentId);
+    if (content.status !== "scheduled" || !content.scheduledUploadTime)
+      throw new AppError("Only scheduled stories can be uploaded now.", 409, "STORY_NOT_SCHEDULED");
     return this.upload(content.id);
   }
 
@@ -408,15 +438,18 @@ export class AutomationService {
 
   private async chooseCandidate(project: ProjectDocument, candidates: TopicCandidate[], history: Awaited<ReturnType<AutomationRepository["findComparisonHistory"]>>) {
     const accepted: TopicCandidate[] = [];
+    const rejectionReasons: string[] = [];
     for (const candidate of candidates) {
       const duplicate = this.duplicate.compare(candidate, history, this.config.getDefaults().similarityThreshold);
       const rotation = this.rotation.violations(candidate, history);
       if (duplicate.duplicate || rotation.length) {
+        const reasons = [...duplicate.reasons, ...rotation];
+        rejectionReasons.push(...reasons);
         await this.repository.createRejected({ userId: project.userId, projectId: project._id, nicheId: project.nicheId ?? "reddit", topic: candidate.topic,
-          title: candidate.title, reasons: [...duplicate.reasons, ...rotation], similarityScore: duplicate.score, matchedContentId: duplicate.matchedHistoryId as never });
+          title: candidate.title, reasons, similarityScore: duplicate.score, matchedContentId: duplicate.matchedHistoryId as never });
       } else accepted.push(candidate);
     }
-    if (!accepted.length) throw new AppError("No sufficiently unique topic survived duplicate and rotation checks.", 409, "NO_UNIQUE_TOPICS");
+    if (!accepted.length) throw new AppError("No sufficiently unique topic survived duplicate and rotation checks.", 409, "NO_UNIQUE_TOPICS", { reasons: [...new Set(rejectionReasons)] });
     const weight = (candidate: TopicCandidate) => Object.values(candidate.scores).reduce((sum, score) => sum + score, 0) + candidate.factualConfidence;
     return accepted.sort((a, b) => weight(b) - weight(a))[0];
   }

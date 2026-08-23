@@ -4,9 +4,9 @@ export class TopicRotationService {
   public violations(candidate: TopicCandidate, history: ContentHistoryDocument[], lookback = 5): string[] {
     const recent = history.slice(0, lookback); const normalize = (v:string) => v.toLowerCase().trim();
     const reasons: string[] = [];
-    const recentEntities = new Set(recent.flatMap((x) => x.importantEntities.map(normalize)));
-    const repeated = candidate.importantEntities.map(normalize).filter((x) => recentEntities.has(x));
-    if (repeated.length) reasons.push(`recent subject rotation: ${repeated.slice(0,3).join(", ")}`);
+    const candidateSubject = normalize(candidate.importantEntities[0] || candidate.topic);
+    const recentSubjects = new Set(recent.map((x) => normalize(x.importantEntities[0] || x.topic)));
+    if (candidateSubject && recentSubjects.has(candidateSubject)) reasons.push(`recent subject rotation: ${candidateSubject}`);
     if (recent.slice(0,2).some((x) => x.storyFormat === (candidate as TopicCandidate & { storyFormat?: string }).storyFormat)) reasons.push("recent story-format rotation");
     return reasons;
   }

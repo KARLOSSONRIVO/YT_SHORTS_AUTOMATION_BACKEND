@@ -50,6 +50,8 @@ export class ProjectController {
     await this.automation.queueNow(getAuthenticatedUser(request).id, String(request.params.projectId)), 202);
   approveStory = async (request: Request, response: Response) => sendSuccess(response,
     await this.automation.approve(getAuthenticatedUser(request).id, String(request.params.projectId), String(request.params.storyId)));
+  uploadStoryNow = async (request: Request, response: Response) => sendSuccess(response,
+    await this.automation.uploadNow(getAuthenticatedUser(request).id, String(request.params.projectId), String(request.params.storyId)), 202);
   rejectStory = async (request: Request, response: Response) => sendSuccess(response,
     await this.automation.reject(getAuthenticatedUser(request).id, String(request.params.projectId), String(request.params.storyId)));
   retryGeneration = async (request: Request, response: Response) => sendSuccess(response,

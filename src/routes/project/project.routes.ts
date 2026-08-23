@@ -48,6 +48,7 @@ export const createProjectRoutes = (controller: ProjectController, uploadMiddlew
   router.post("/:projectId/pause", validate({ params: projectIdParamsSchema }), asyncHandler(controller.pause));
   router.post("/:projectId/resume", validate({ params: projectIdParamsSchema }), asyncHandler(controller.resume));
   router.post("/:projectId/stories/:storyId/approve", validate({ params: projectStoryParamsSchema }), asyncHandler(controller.approveStory));
+  router.post("/:projectId/stories/:storyId/upload-now", validate({ params: projectStoryParamsSchema }), asyncHandler(controller.uploadStoryNow));
   router.post("/:projectId/stories/:storyId/reject", validate({ params: projectStoryParamsSchema }), asyncHandler(controller.rejectStory));
   router.post("/:projectId/stories/:storyId/retry-generation", validate({ params: projectStoryParamsSchema }), asyncHandler(controller.retryGeneration));
   router.post("/:projectId/stories/:storyId/retry-upload", validate({ params: projectStoryParamsSchema }), asyncHandler(controller.retryUpload));
