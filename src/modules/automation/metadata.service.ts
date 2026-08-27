@@ -1,9 +1,11 @@
 import type { NicheProfile, TopicCandidate } from "./automation.types";
+import { sanitizeUploadTitle, normalizeHashtags } from "../services/publish/upload-text";
 export class PlatformMetadataService {
   public build(candidate: TopicCandidate, profile: NicheProfile, platform: string) {
-    const hashtags = [...new Set([...profile.hashtagCategories, ...candidate.keywords.slice(0,4)])].map((x) => `#${x.replace(/[^a-zA-Z0-9]/g, "")}`).filter((x) => x.length > 1);
+    const tags = normalizeHashtags([...profile.hashtagCategories, ...candidate.keywords.slice(0, 4)], { ensureShorts: true });
+    const hashtags = tags.map((tag) => `#${tag}`);
     const titleLimit = platform === "youtube" ? 100 : 150;
-    const title = candidate.title.replace(/[\x00-\x1f]/g, " ").replace(/\s+/g, " ").trim().slice(0, titleLimit);
+    const title = sanitizeUploadTitle(candidate.title, "YouTube Short", titleLimit);
     return { title, description: `${candidate.summary}\n\nSources are recorded in the content history.\n\n${hashtags.join(" ")}`.slice(0, 5000), hashtags, keywords: candidate.keywords };
   }
 }

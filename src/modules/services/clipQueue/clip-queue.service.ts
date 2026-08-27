@@ -10,6 +10,7 @@ import type { AutomationRepository } from '../../repositories/automation.reposit
 import type { ProjectService } from '../project/project.service';
 import type { StorageService } from '../storage/storage.service';
 import type { YouTubeService } from '../youtube/youtube.service';
+import { sanitizeUploadTitle, normalizeHashtags } from '../publish/upload-text';
 
 export interface AddQueuedClipInput {
   userId: string; projectId: string; file: Express.Multer.File; thumbnail?: Express.Multer.File; subtitles?: Express.Multer.File;
@@ -134,10 +135,11 @@ export class ClipQueueService {
     const channel = await this.channels.findById(String(clip.accountId));
     if (!channel || channel.status !== 'connected') throw new AppError('YouTube account is unavailable.', 409, 'ACCOUNT_CREDENTIALS_INACTIVE');
     try {
-      const description = [clip.description, clip.hashtags.map((tag) => '#' + tag.replace(/^#/, '')).join(' ')].filter(Boolean).join('\n\n');
+      const title = sanitizeUploadTitle(clip.title);
+      const description = [clip.description, normalizeHashtags(clip.hashtags, { ensureShorts: true }).map((tag) => '#' + tag).join(' ')].filter(Boolean).join('\n\n');
       const result = await this.youtube.uploadShort({
         tokens: { access_token: channel.accessToken, refresh_token: channel.refreshToken, expiry_date: channel.tokenExpiryDate?.getTime() },
-        title: clip.title, description, privacyStatus: clip.privacyStatus, videoPath: this.storage.resolveStoragePath(clip.sourceFile)
+        title, description, privacyStatus: clip.privacyStatus, videoPath: this.storage.resolveStoragePath(clip.sourceFile)
         ,madeForKids: clip.audienceSetting === 'made_for_kids',
         thumbnailPath: clip.thumbnailFile ? this.storage.resolveStoragePath(clip.thumbnailFile) : undefined,
         subtitlePath: clip.subtitleFile ? this.storage.resolveStoragePath(clip.subtitleFile) : undefined,
@@ -149,7 +151,7 @@ export class ClipQueueService {
       await this.uploads.create({
         projectId: clip.projectId, channelId: clip.accountId, youtubeVideoId: result.id ?? undefined,
         idempotencyKey: clip.uploadIdempotencyKey,
-        title: clip.title, description, privacyStatus: clip.privacyStatus, status: 'uploaded', uploadedAt: new Date(),
+        title, description, privacyStatus: clip.privacyStatus, status: 'uploaded', uploadedAt: new Date(),
         responseSnapshot: { ...result, queuedClipId: clip.id, uploadIdempotencyKey: clip.uploadIdempotencyKey }
       });
       await this.projects.updateProject(String(clip.projectId), { lastUploadAt: new Date() });

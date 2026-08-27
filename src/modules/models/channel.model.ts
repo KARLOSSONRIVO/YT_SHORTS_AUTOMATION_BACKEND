@@ -11,6 +11,8 @@ export interface Channel {
   scope?: string;
   tokenExpiryDate?: Date;
   status: "connected" | "disconnected";
+  nicheId?: string;
+  nicheLockExempt?: boolean;
 }
 
 const channelSchema = new Schema<Channel>(
@@ -24,7 +26,9 @@ const channelSchema = new Schema<Channel>(
     tokenType: { type: String },
     scope: { type: String },
     tokenExpiryDate: { type: Date },
-    status: { type: String, enum: ["connected", "disconnected"], default: "connected" }
+    status: { type: String, enum: ["connected", "disconnected"], default: "connected" },
+    nicheId: { type: String, index: true },
+    nicheLockExempt: { type: Boolean, default: false }
   },
   { timestamps: true }
 );

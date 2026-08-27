@@ -15,6 +15,10 @@
     "test": "node --import tsx --test tests/**/*.test.ts",
     "migrate:project-automation": "tsx src/migrations/20260713-unify-project-automation.ts"
     ,"migrate:unified-content-types": "tsx src/migrations/20260713-unified-content-types.ts"
+    ,"migrate:channel-niche-lock": "tsx src/migrations/20260826-channel-niche-lock-exempt.ts"
+    ,"migrate:normalize-niche-ids": "tsx src/migrations/20260826-normalize-niche-identifiers.ts"
+    ,"migrate:set-channel-niches": "tsx src/migrations/20260826-set-channel-niches.ts"
+    ,"diag:niche": "tsx src/_tmp-diagnose-niche-drift.ts"
   },
   "dependencies": {
     "axios": "^1.8.4",

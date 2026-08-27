@@ -84,6 +84,15 @@ export class AutomationService {
       status: channel.status, authenticationActive: channel.status === "connected" && hasCredentials && !needsRefresh, needsRefresh };
   }
 
+  private async enforceChannelNicheLock(userId: string, channelId: string, nicheId: string) {
+    const channel = await this.channels.findByIdAndUserId(channelId, userId);
+    if (!channel) throw new AppError("YouTube account was not found.", 404, "ACCOUNT_NOT_FOUND");
+    if (channel.nicheLockExempt) return;
+    const claimed = await this.channels.designateNicheIfFreeOrMatching(channelId, nicheId);
+    if (!claimed) throw new AppError("This YouTube channel is already dedicated to a different niche. Each channel can host only one faceless niche — pick another channel.",
+      409, "CHANNEL_NICHE_LOCKED", { channelId, lockedNiche: channel.nicheId, requestedNiche: nicheId });
+  }
+
   public async createProject(userId: string, input: CreateAutomationProjectInput) {
     if (input.contentType === "FACELESS_NICHE" && !input.nicheId)
       throw new AppError("Select an active niche profile.", 422, "NICHE_REQUIRED");
@@ -93,6 +102,7 @@ export class AutomationService {
     this.validateTimezone(input.timezone);
     const account = await this.validateAccount(userId, input.accountId);
     if (!account.authenticationActive) throw new AppError("Assigned account credentials are inactive or need refresh.", 409, "ACCOUNT_CREDENTIALS_INACTIVE", account);
+    if (input.contentType === "FACELESS_NICHE") await this.enforceChannelNicheLock(userId, input.accountId, input.nicheId!);
     const nextRunAt = this.nextProjectRun(input.contentType, input.timezone, input.uploadTime);
     const project = await this.projects.createAutomationProject({ ...input, userId, nextRunAt });
     if (input.contentType === "REDDIT_STORY" && input.redditConfig) await this.reddit!.saveConfig(project.id, input.redditConfig);
@@ -114,6 +124,8 @@ export class AutomationService {
       const account = await this.validateAccount(userId, input.accountId);
       if (!account.authenticationActive) throw new AppError("Assigned account credentials are inactive or need refresh.", 409, "ACCOUNT_CREDENTIALS_INACTIVE", account);
     }
+    const effectiveAccountId = input.accountId ?? (project.accountId ? String(project.accountId) : undefined);
+    if (contentType === "FACELESS_NICHE" && nicheId && effectiveAccountId) await this.enforceChannelNicheLock(userId, effectiveAccountId, nicheId);
     if (contentType === "REDDIT_STORY" && input.redditConfig && this.reddit) await this.reddit.saveConfig(projectId, input.redditConfig);
     return this.projects.updateProject(projectId, { ...input, title: input.name, name: input.name, durationSeconds: 60, targetDurationSeconds: 60,
       allowedStoryFormats: input.allowedNarrativeFormats,

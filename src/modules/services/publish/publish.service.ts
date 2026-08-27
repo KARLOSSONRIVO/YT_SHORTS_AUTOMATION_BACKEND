@@ -13,6 +13,7 @@ import { ProjectService } from "../project/project.service";
 import { QueueService } from "../queue/queue.service";
 import { StorageService } from "../storage/storage.service";
 import { YouTubeService } from "../youtube/youtube.service";
+import { sanitizeUploadTitle } from "./upload-text";
 
 export class PublishService {
   constructor(
@@ -365,25 +366,7 @@ export class PublishService {
   }
 
   private normalizeUploadTitle(rawTitle: string, fallbackTitle: string) {
-    const candidate = rawTitle && rawTitle.trim().length > 0 ? rawTitle : fallbackTitle;
-    const sanitized = candidate
-      .replace(/[\x00-\x1F\x7F]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    const trimmed = sanitized.slice(0, 100).trim();
-
-    if (trimmed.length > 0) {
-      return trimmed;
-    }
-
-    const fallback = fallbackTitle
-      .replace(/[\x00-\x1F\x7F]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 100)
-      .trim();
-
-    return fallback || "YouTube Short";
+    return sanitizeUploadTitle(rawTitle, fallbackTitle);
   }
 
   private async resolveArchiveSource(record: {

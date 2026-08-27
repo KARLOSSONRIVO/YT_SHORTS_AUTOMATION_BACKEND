@@ -21,6 +21,14 @@ export class ChannelRepository {
     return ChannelModel.findOne({ _id: channelId, userId }).exec();
   }
 
+  public designateNicheIfFreeOrMatching(channelId: string, nicheId: string): Promise<ChannelDocument | null> {
+    return ChannelModel.findOneAndUpdate(
+      { _id: channelId, nicheLockExempt: { $ne: true }, $or: [{ nicheId: { $exists: false } }, { nicheId: null }, { nicheId }] },
+      { $set: { nicheId } },
+      { new: true }
+    ).exec();
+  }
+
   public findByUserId(userId: string): Promise<ChannelDocument[]> {
     return ChannelModel.find({ userId }).sort({ createdAt: -1 }).exec();
   }
