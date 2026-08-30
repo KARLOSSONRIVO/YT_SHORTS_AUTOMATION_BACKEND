@@ -81,7 +81,10 @@ export const createApplicationContainer = async () => {
   const sourceVideoRepository = new SourceVideoRepository();
   const uploadHistoryRepository = new UploadHistoryRepository();
   const automationRepository = new AutomationRepository();
-  const automationRunCoordinator = new AutomationRunCoordinator(redisConnection);
+  const automationRunCoordinator = new AutomationRunCoordinator(redisConnection, {
+    maxConcurrentProjects: env.AUTOMATION_MAX_CONCURRENT_PROJECTS,
+    staleMs: env.AUTOMATION_RUN_STALE_MS
+  });
 
   const storageService = new StorageService(storageClient);
   await storageService.ensureReady();

@@ -33,6 +33,20 @@ const candidate: TopicCandidate={topic:"The runner who broke the world record",t
 
 test("duration targets sixty seconds by speaking rate",()=>{const d=new DurationValidator();assert.deepEqual(d.targetWordRange(60,150),{min:138,target:150,max:162});assert.equal(d.validate(Array(150).fill("word").join(" "),60,150).valid,true)});
 test("clearing a story error unsets the persisted fields",async()=>{let captured:unknown;const update=mock.method(ContentHistoryModel,"findByIdAndUpdate",(_id:string,changes:unknown)=>{captured=changes;return{exec:async()=>null} as never});try{await new AutomationRepository().updateHistory("story-1",{status:"rendering",lastError:undefined,nextRetryAt:undefined});assert.deepEqual(captured,{$set:{status:"rendering"},$unset:{lastError:"",nextRetryAt:""}})}finally{update.mock.restore()}});
+test("duplicate generation history returns the record created by the concurrent run",async()=>{
+  const existing={id:"story-existing",generationIdempotencyKey:"project-1:2026-08-30:REDDIT_FETCH"};
+  const duplicateError=Object.assign(new Error("E11000 duplicate key error"),{code:11000});
+  const upsert=mock.method(ContentHistoryModel,"findOneAndUpdate",()=>({exec:async()=>{throw duplicateError}}) as never);
+  const find=mock.method(ContentHistoryModel,"findOne",()=>({exec:async()=>existing}) as never);
+  try{
+    const result=await new AutomationRepository().createHistoryIdempotent({generationIdempotencyKey:"project-1:2026-08-30:REDDIT_FETCH"} as never);
+    assert.equal(result.content,existing);
+    assert.equal(result.created,false);
+  }finally{
+    upsert.mock.restore();
+    find.mock.restore();
+  }
+});
 test("scheduled stories can be uploaded immediately through the project action",async()=>{
   const updates:Array<Record<string,unknown>>=[];
   let claimed=false;

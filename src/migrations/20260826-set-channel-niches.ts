@@ -51,7 +51,7 @@ const run = async () => {
 
   // 1) Build the canonical niche resolver (profileId is the compared value).
   type NicheRow = { profileId?: unknown; slug?: unknown; name?: unknown };
-  let nicheRows: NicheRow[] = await db.collection("nicheprofiles").find({}).toArray();
+  let nicheRows: NicheRow[] = await db.collection<NicheRow>("nicheprofiles").find({}).toArray();
 
   if (nicheRows.length === 0) {
     // Fallback: the same source the app seeds from.

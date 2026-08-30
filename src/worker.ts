@@ -42,13 +42,13 @@ const bootstrap = async () => {
         if (!isRateLimitFailure(error)) throw unrecoverableWithCause(error, "Permanent story-stage failure");
         throw error;
       } }) as Processor,
-      workerOptions.shared
+      workerOptions.story
     ),
     new Worker(
       QUEUE_NAMES.AUTOMATION,
-      (async (job) => { try { return await automationService.execute(String(job.data.projectId), job.data.scheduledDate ? String(job.data.scheduledDate) : undefined,
-        job.data.trigger === "manual" ? "manual" : "scheduled"); } catch (error) {
-        await automationService.recordFailure(String(job.data.projectId), error).catch(() => undefined);
+      (async (job) => { const automationRunId = job.id == null ? undefined : String(job.id); try { return await automationService.execute(String(job.data.projectId), job.data.scheduledDate ? String(job.data.scheduledDate) : undefined,
+        job.data.trigger === "manual" ? "manual" : "scheduled", automationRunId); } catch (error) {
+        await automationService.recordFailure(String(job.data.projectId), error, automationRunId).catch(() => undefined);
         if (!shouldRetryAutomationFailure(error, job.attemptsMade)) throw unrecoverableWithCause(error, "Permanent automation failure");
         throw error;
       } }) as Processor,

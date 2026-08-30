@@ -21,10 +21,11 @@ export class QueueService {
     return this.add("ANALYSIS", "video.analysis.requested", payload);
   }
 
-  public addStoryJob(payload: Record<string, unknown>) {
+  public addStoryJob(payload: Record<string, unknown>, options?: JobsOptions) {
     return this.add("STORY", "faceless.story.requested", payload, {
       attempts: 1000,
-      backoff: { type: "provider-rate-limit" }
+      backoff: { type: "provider-rate-limit" },
+      ...options
     });
   }
 

@@ -1,5 +1,6 @@
 import { AppError } from "../../common/errors/app-error";
 import type { ProjectDocument } from "../models/project.model";
+import type { ContentHistory } from "../models/content-history.model";
 import type { ChannelRepository } from "../repositories/channel.repository";
 import type { FacelessVideoRepository } from "../repositories/faceless-video.repository";
 import type { AutomationRepository } from "../repositories/automation.repository";
@@ -152,14 +153,13 @@ export class AutomationService {
     const generationIdempotencyKey = projectDailyIdempotencyKey(projectId, date, project.contentType);
     const existing = await this.repository.findByGenerationKey(generationIdempotencyKey);
     if (existing) throw new AppError("This project already has a generation job for today.", 409, "ONE_STORY_PER_DAY");
-    const workflow = project.contentType === "REDDIT_STORY" ? "reddit-fetch" : "faceless-generation";
-    const job = await this.queues.addAutomationJob({ projectId, scheduledDate: date, trigger: "manual" },
-      { jobId: bullmqJobId("project:" + projectId + ":" + date + ":" + workflow), ...automationRetryOptions() });
+    const job = await this.queues.addAutomationJob({ projectId, scheduledDate: date, trigger: "manual", idempotencyKey: generationIdempotencyKey },
+      { jobId: bullmqJobId(generationIdempotencyKey), ...automationRetryOptions() });
     await this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "generation_queued", severity: "info", message: "Generate Now queued for today." });
     return { jobId: job.id, status: "queued", generationIdempotencyKey };
   }
 
-  public async execute(projectId: string, scheduledDate?: string, trigger: "manual" | "scheduled" = "scheduled") {
+  public async execute(projectId: string, scheduledDate?: string, trigger: "manual" | "scheduled" = "scheduled", runId?: string) {
     const project = await this.projects.getProjectOrThrow(projectId);
     if (project.contentType === "CLIP_UPLOAD") {
       if (!this.clipQueue) throw new AppError("Clip queue is unavailable.", 503, "CLIP_QUEUE_UNAVAILABLE");
@@ -168,9 +168,33 @@ export class AutomationService {
     this.assertAutomationProject(project);
     const date = scheduledDate ?? this.schedules.localDateKey(project.timezone!);
     const generationIdempotencyKey = projectDailyIdempotencyKey(projectId, date, project.contentType);
+    const automationRunId = runId ?? generationIdempotencyKey;
+    const coordinator = this.coordinator;
+    const startHeartbeat = () => coordinator
+      ? setInterval(() => { void coordinator.touch(projectId, automationRunId).catch(() => undefined); }, 30_000)
+      : undefined;
     const existing = await this.repository.findByGenerationKey(generationIdempotencyKey);
-    if (existing) return { contentIds: [existing.id], projectId, duplicateJob: true };
-    await this.coordinator?.begin(projectId, generationIdempotencyKey);
+    if (existing) {
+      const canResume = existing.status === "rendering"
+        && existing.renderProjectId
+        && existing.metadata?.automationRunId === automationRunId;
+      if (!canResume) return { contentIds: [existing.id], projectId, duplicateJob: true };
+
+      await this.coordinator?.begin(projectId, automationRunId);
+      const heartbeatTimer = startHeartbeat();
+      try {
+        await this.projects.updateProject(projectId, { automationStatus: "running", lastRunAt: new Date() });
+        const resumedJob = await this.faceless.startAutomation(String(existing.renderProjectId));
+        return { contentIds: [existing.id], projectId, renderProjectId: String(existing.renderProjectId), resumedJob: true, jobId: resumedJob?.id };
+      } catch (error) {
+        if (!isRateLimitFailure(error)) await this.coordinator?.finish(projectId, automationRunId);
+        throw error;
+      } finally {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+      }
+    }
+    await this.coordinator?.begin(projectId, automationRunId);
+    const heartbeatTimer = startHeartbeat();
     try {
     const channel = await this.channels.findById(String(project.accountId));
     if (!channel || channel.status !== "connected" || (!channel.refreshToken && !channel.accessToken)) throw new AppError("Assigned account credentials are inactive.", 409, "ACCOUNT_CREDENTIALS_INACTIVE");
@@ -228,7 +252,7 @@ export class AutomationService {
     const scheduledUploadTime = trigger === "manual"
       ? new Date()
       : this.schedules.nextRun(project.timezone!, project.uploadTime!, AutomationService.ACTIVE_DAYS, new Date(Date.now() - 60_000));
-    const content = await this.repository.createHistory({ userId: project.userId, projectId: project._id, renderProjectId: renderProject._id,
+    const historyInput: ContentHistory = { userId: project.userId, projectId: project._id, renderProjectId: renderProject._id,
       nicheId: historyNicheId, accountId: project.accountId!, topic: selected.topic, normalizedTopic: normalizeText(selected.topic), title: selected.title,
       projectTitle: selected.title, description: selected.summary, summary: selected.summary, importantEntities: selected.importantEntities,
       dates: selected.dates, events: selected.events, keywords: selected.keywords, sourceLinks: selected.sourceLinks, storyAngle: selected.storyAngle,
@@ -240,15 +264,24 @@ export class AutomationService {
       metadata: { candidate: selected, contentRestrictions: profile.contentRestrictions, hashtagCategories: profile.hashtagCategories,
         researchRequirements: profile.researchRequirements,
         visualStrategy: project.contentType === "REDDIT_STORY" ? "background_video" : project.visualType === "ANIMATED" ? "ai_animated" : "ai_generated",
-        contentType: project.contentType, redditSourceId: redditSelection?.record.id, assignedAccount: channel.title } });
+        contentType: project.contentType, redditSourceId: redditSelection?.record.id, assignedAccount: channel.title, automationRunId } };
+    const historyResult = typeof this.repository.createHistoryIdempotent === "function"
+      ? await this.repository.createHistoryIdempotent(historyInput)
+      : { content: await this.repository.createHistory(historyInput), created: true };
+    const content = historyResult.content;
+    if (!historyResult.created) {
+      return { contentIds: [content.id], projectId, duplicateJob: true };
+    }
     if (redditSelection) await redditSelection.record.updateOne({ storyId: content._id, status: "transformed", generatedTitle: selected.title, summary: selected.summary });
     await this.faceless.startAutomation(renderProject.id);
     await this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "generation_started", severity: "info",
       message: `Started a unique ${storyFormat.replaceAll("_", " ")} story: ${selected.title}`, metadata: { contentId: content.id, renderProjectId: renderProject.id } });
     return { contentIds: [content.id], projectId, renderProjectId: renderProject.id, topic: selected.topic, storyFormat, voiceId: voice.selected.id };
     } catch (error) {
-      if (!isRateLimitFailure(error)) await this.coordinator?.finish(projectId);
+      if (!isRateLimitFailure(error)) await this.coordinator?.finish(projectId, automationRunId);
       throw error;
+    } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
     }
   }
 
@@ -330,12 +363,25 @@ export class AutomationService {
     for (const content of pending) {
       try {
       if (!content.renderProjectId) continue;
+      const automationRunId = typeof content.metadata?.automationRunId === "string"
+        ? content.metadata.automationRunId
+        : content.generationIdempotencyKey;
       if (content.status === "scheduled") {
+        // Generation is already finished here - this run is only waiting for
+        // its upload window. Holding a generation slot while that clock runs is
+        // what queued every other project behind a scheduled video, so the slot
+        // goes back to the pool and the upload proceeds on its own schedule.
+        await this.coordinator?.finish(String(content.projectId), automationRunId);
         if (!content.scheduledUploadTime || content.scheduledUploadTime <= new Date()) {
           try { results.push(await this.upload(content.id)); } catch (error) { results.push(error); }
         }
         continue;
       }
+      // Still generating: refresh the slot so it is not reclaimed. A run that
+      // stops appearing here (crashed worker, lost job) stops heartbeating and
+      // its slot is reclaimed as stale in minutes instead of being held until a
+      // long TTL expires.
+      await this.coordinator?.touch(String(content.projectId), automationRunId);
       const [rootProject, renderProject, script, finalVideo, render, channel, subtitleAssets] = await Promise.all([
         this.projects.getProjectOrThrow(String(content.projectId)), this.projects.getProjectOrThrow(String(content.renderProjectId)),
         this.assets.findScript(String(content.renderProjectId)), this.assets.findLatestAssetByType(String(content.renderProjectId), "final_video"),
@@ -344,7 +390,7 @@ export class AutomationService {
       ]);
       if (renderProject.status === "failed") {
         results.push(await this.repository.updateHistory(content.id, { status: "failed", lastError: "Faceless rendering failed." }));
-        await this.coordinator?.finish(rootProject.id);
+        await this.coordinator?.finish(rootProject.id, automationRunId);
         continue;
       }
       if (!script || !finalVideo) {
@@ -374,18 +420,21 @@ export class AutomationService {
         await this.projects.updateProject(rootProject.id, { automationStatus: "error" });
         await this.repository.logActivity({ projectId: rootProject._id, userId: rootProject.userId, type: "quality_control_failed", severity: "error",
           message: `Story failed quality control: ${check.critical.join("; ")}`, metadata: { contentId: content.id } });
-        await this.coordinator?.finish(rootProject.id);
+        await this.coordinator?.finish(rootProject.id, automationRunId);
         continue;
       }
       const nextStatus = rootProject.automationMode === "draft_only" ? "draft" : rootProject.automationMode === "approval_before_upload" ? "awaiting_approval" : "scheduled";
       results.push(await this.repository.updateHistory(content.id, { status: nextStatus }));
+      // Generation is complete for every outcome here - draft, awaiting_approval
+      // and scheduled all wait on a human or on the clock, not on render
+      // capacity. Release the slot now instead of holding it until upload.
+      await this.coordinator?.finish(rootProject.id, automationRunId);
       await this.projects.updateProject(rootProject.id, { lastSuccessfulGenerationAt: new Date(), automationStatus: rootProject.automationEnabled ? "active" : "paused" });
       await this.repository.logActivity({ projectId: rootProject._id, userId: rootProject.userId, type: "generation_completed", severity: "info",
         message: rootProject.automationMode === "approval_before_upload" ? "Story passed generation and is waiting for approval." : "Story passed generation and quality preparation." });
       if (nextStatus === "scheduled" && (!content.scheduledUploadTime || content.scheduledUploadTime <= new Date())) {
         try { results.push(await this.upload(content.id)); } catch (error) { results.push(error); }
       }
-      if (nextStatus === "draft") await this.coordinator?.finish(rootProject.id);
       } catch (error) {
         results.push(error);
       }
@@ -410,6 +459,9 @@ export class AutomationService {
   private async upload(contentId: string) {
     const content = await this.repository.findHistory(contentId);
     if (!content?.renderProjectId) throw new AppError("Story render is missing.", 409, "CONTENT_RENDER_MISSING");
+    const automationRunId = typeof content.metadata?.automationRunId === "string"
+      ? content.metadata.automationRunId
+      : content.generationIdempotencyKey;
     const [project, channel, finalVideo, subtitleAssets] = await Promise.all([this.projects.getProjectOrThrow(String(content.projectId)),
       this.channels.findById(String(content.accountId)), this.assets.findLatestAssetByType(String(content.renderProjectId), "final_video"),
       this.assets.findAssets(String(content.renderProjectId), { assetType: { $in: ["subtitle_srt", "subtitle_ass"] } })]);
@@ -438,7 +490,7 @@ export class AutomationService {
       const uploaded = await this.repository.updateHistory(content.id, { status: "uploaded", lastError: undefined, uploadDate: new Date(), platformVideoId: result.youtubeVideoId ?? undefined,
         platformUrl: result.videoUrl, metadata: { ...(content.metadata ?? {}), platformMetadata: meta } });
       await this.repository.clearCheckpoint(project.id, content.generationIdempotencyKey.split(":")[1] ?? "");
-      await this.coordinator?.finish(project.id);
+      await this.coordinator?.finish(project.id, automationRunId);
       return uploaded;
     } catch (error) {
       const temporary = isTemporaryFailure(error) && content.uploadAttempts < 3;
@@ -470,7 +522,7 @@ export class AutomationService {
     const project = await this.projects.getOwnedProjectOrThrow(projectId, userId); this.assertAutomationProject(project); return project;
   }
 
-  public async recordFailure(projectId: string, error: unknown) {
+  public async recordFailure(projectId: string, error: unknown, runId?: string) {
     const project = await this.projects.getProjectOrThrow(projectId);
     const message = error instanceof Error ? error.message : "Daily story generation failed.";
     if (isQueuedWorkflowFailure(error)) {
@@ -482,7 +534,7 @@ export class AutomationService {
         message: `AI provider rate limit reached. The active step is paused and queued for retry: ${message}` });
     }
     await this.projects.updateProject(projectId, { automationStatus: "error" });
-    await this.coordinator?.finish(projectId);
+    if (runId) await this.coordinator?.finish(projectId, runId);
     return this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "generation_failed", severity: "error", message });
   }
 

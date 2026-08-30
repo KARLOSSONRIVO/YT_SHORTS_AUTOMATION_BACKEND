@@ -29,7 +29,16 @@ const envSchema = z.object({
   GROQ_TOPIC_RESEARCH_FALLBACK_MODEL: z.string().default("qwen/qwen3.6-27b"),
   GROQ_TOPIC_RESEARCH_SECONDARY_FALLBACK_MODEL: z.string().default("openai/gpt-oss-20b"),
   GROQ_API_BASE_URL: z.string().url().default("https://api.groq.com/openai/v1"),
-  AUTOMATION_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(10000).default(60000)
+  AUTOMATION_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(10000).default(60000),
+  // How many distinct projects may hold a generation slot at once. Set to 1 to
+  // restore the previous single-project-at-a-time behaviour.
+  AUTOMATION_MAX_CONCURRENT_PROJECTS: z.coerce.number().int().positive().default(3),
+  // A slot whose run has not been seen by the reconciler for this long is
+  // treated as abandoned and reclaimed.
+  AUTOMATION_RUN_STALE_MS: z.coerce.number().int().min(60000).default(45 * 60 * 1000),
+  QUEUE_WORKER_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  AUTOMATION_LIMITER_MAX: z.coerce.number().int().positive().default(3),
+  AUTOMATION_LIMITER_DURATION_MS: z.coerce.number().int().positive().default(60000)
 });
 
 const parsedEnv = envSchema.parse(process.env);

@@ -77,6 +77,23 @@ export class FacelessVideoService {
 
   public async enqueueStage(projectId: string, stage: FacelessStage, options: { autoRun?: boolean } = {}) {
     await this.projectService.getProjectOrThrow(projectId);
+    const existingJob = (await this.jobService.listByProjectId(projectId))
+      .find((job) => job.type === `faceless.${stage}`);
+    if (existingJob && ["queued", "active", "completed"].includes(existingJob.status)) {
+      if (existingJob.status !== "completed") {
+        const enqueuedJob = await this.queueService.addStoryJob({
+          jobId: existingJob.id,
+          projectId,
+          stage,
+          autoRun: options.autoRun ?? false
+        }, { jobId: existingJob.id });
+        if (String(existingJob.externalJobId) !== String(enqueuedJob.id)) {
+          await this.jobService.updateJob(existingJob.id, { externalJobId: `${enqueuedJob.id}` });
+        }
+      }
+      return existingJob;
+    }
+
     await this.projectService.updateProject(projectId, {
       status: "queued",
       workflowStage: STAGE_WORKFLOW[stage].workflowStage

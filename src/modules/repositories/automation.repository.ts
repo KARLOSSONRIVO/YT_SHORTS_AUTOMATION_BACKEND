@@ -1,4 +1,4 @@
-import { ContentHistoryModel, type ContentHistory } from "../models/content-history.model";
+import { ContentHistoryModel, type ContentHistory, type ContentHistoryDocument } from "../models/content-history.model";
 import { ProjectActivityModel, type ProjectActivity } from "../models/project-activity.model";
 import { RejectedTopicModel, type RejectedTopic } from "../models/rejected-topic.model";
 import { AutomationCheckpointModel } from "../models/automation-checkpoint.model";
@@ -11,6 +11,26 @@ export class AutomationRepository {
   }
   clearCheckpoint(projectId: string, scheduledDate: string) { return AutomationCheckpointModel.deleteOne({ projectId, scheduledDate }).exec(); }
   createHistory(input: ContentHistory) { return ContentHistoryModel.create(input); }
+  async createHistoryIdempotent(input: ContentHistory): Promise<{ content: ContentHistoryDocument; created: boolean }> {
+    let result: { value: ContentHistoryDocument | null; lastErrorObject?: { updatedExisting?: boolean } };
+    try {
+      result = await ContentHistoryModel.findOneAndUpdate(
+        { generationIdempotencyKey: input.generationIdempotencyKey },
+        { $setOnInsert: input },
+        { new: true, upsert: true, setDefaultsOnInsert: true, runValidators: true, includeResultMetadata: true }
+      ).exec() as unknown as typeof result;
+    } catch (error) {
+      const duplicateKey = typeof error === "object" && error !== null && "code" in error && error.code === 11000;
+      if (!duplicateKey) throw error;
+      const existing = await ContentHistoryModel.findOne({ generationIdempotencyKey: input.generationIdempotencyKey }).exec();
+      if (!existing) throw error;
+      return { content: existing, created: false };
+    }
+    if (!result.value) throw new Error("Content history upsert returned no document.");
+    const updatedExisting = result.lastErrorObject?.updatedExisting;
+    if (typeof updatedExisting !== "boolean") throw new Error("Content history upsert did not report whether it inserted a document.");
+    return { content: result.value, created: !updatedExisting };
+  }
   updateHistory(id: string, update: Partial<ContentHistory>) {
     const set: Partial<ContentHistory> = {};
     const unset: Record<string, ""> = {};
