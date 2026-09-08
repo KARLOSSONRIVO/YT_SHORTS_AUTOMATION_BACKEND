@@ -31,6 +31,11 @@ export interface CreateFacelessStoryProjectInput {
   speakingRate?: number;
   fallbackVoice?: string;
   contentType?: ContentType;
+  nicheId?: string;
+  sourceText?: string;
+  experimentVariant?: string;
+  nextStoryTitle?: string;
+  nextStoryTopic?: string;
   subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
 }
 
@@ -112,6 +117,10 @@ export class ProjectService {
       contentType: input.contentType ?? "FACELESS_NICHE",
       facelessSource: "daily_automation",
       topic: input.topic,
+      nicheId: input.nicheId,
+      sourceText: input.sourceText,
+      nextStoryTitle: input.nextStoryTitle,
+      nextStoryTopic: input.nextStoryTopic,
       platforms: input.platforms ?? ["youtube"],
       targetDurationSeconds: input.targetDurationSeconds ?? 60,
       stylePreset: input.stylePreset ?? "cinematic documentary",
@@ -124,6 +133,7 @@ export class ProjectService {
       storyFormat: input.storyFormat,
       speakingRate: input.speakingRate,
       fallbackVoice: input.fallbackVoice,
+      experimentVariant: input.experimentVariant,
       subtitlePreferences: {
         ...DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
         ...input.subtitlePreferences

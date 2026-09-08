@@ -34,6 +34,11 @@ export interface CreateFacelessProjectInput {
   speakingRate?: number;
   fallbackVoice?: string;
   contentType?: ContentType;
+  nicheId?: string;
+  sourceText?: string;
+  experimentVariant?: string;
+  nextStoryTitle?: string;
+  nextStoryTopic?: string;
 }
 
 interface StoryStagePayload {
@@ -213,7 +218,11 @@ export class FacelessVideoService {
       targetDurationSeconds: project.targetDurationSeconds,
       stylePreset: project.stylePreset,
       scriptFramework: this.effectiveScriptFramework(project),
-      sourceText: project.description
+      sourceText: project.sourceText ?? project.description,
+      nicheId: project.nicheId,
+      experimentVariant: project.experimentVariant,
+      nextStoryTitle: project.nextStoryTitle,
+      nextStoryTopic: project.nextStoryTopic
     });
 
     const scriptTitle = project.contentType === "REDDIT_STORY" ? project.title : response.title;

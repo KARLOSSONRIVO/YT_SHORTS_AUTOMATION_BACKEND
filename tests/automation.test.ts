@@ -12,7 +12,7 @@ import { NicheConfigService } from "../src/modules/automation/niche-config.servi
 import { ScheduleService } from "../src/modules/automation/schedule.service";
 import { TopicRotationService } from "../src/modules/automation/topic-rotation.service";
 import { AUTOMATION_MODES, CONTENT_TYPES, STORY_FORMATS, VISUAL_TYPES } from "../src/modules/automation/automation.types";
-import { AutomationService, automationRetryOptions, bullmqJobId, projectDailyIdempotencyKey, workflowIdempotencyKey } from "../src/modules/automation/automation.service";
+import { AutomationService, automationRetryOptions, automationTargetDuration, bullmqJobId, projectDailyIdempotencyKey, workflowIdempotencyKey } from "../src/modules/automation/automation.service";
 import { createProjectBodySchema } from "../src/modules/validators/project.validator";
 import { createProjectRoutes } from "../src/routes/project/project.routes";
 import { AppError } from "../src/common/errors/app-error";
@@ -94,10 +94,34 @@ test("dashboard hides stale errors from uploaded stories",async()=>{
   assert.deepEqual(dashboard.recentErrors,[]);
 });
 test("format selector uses topic signals",()=>assert.equal(new StoryFormatSelector().select(profile,candidate),"record_breaking_moment"));
+test("psychology niche always uses the psychology script framework",()=>{
+  const psychology=new NicheConfigService().getNicheOrThrow("psychology");
+  const selector=new StoryFormatSelector();
+  assert.equal(selector.framework("one_decision_changed_everything",psychology.id),"psychology_truth");
+  assert.equal(selector.framework("one_decision_changed_everything","philippine_history"),"history_story");
+});
+test("psychology duration is isolated from other content types and niches",()=>{
+  assert.equal(automationTargetDuration("FACELESS_NICHE","psychology",60),45);
+  assert.equal(automationTargetDuration("FACELESS_NICHE","philippine_history",60),50);
+  assert.equal(automationTargetDuration("FACELESS_NICHE","sports",60),60);
+  assert.equal(automationTargetDuration("REDDIT_STORY",undefined,60),60);
+});
+test("Philippine history format selection recognizes hidden-history signals",()=>{
+  const philippineHistory=new NicheConfigService().getNicheOrThrow("philippine_history");
+  const historyCandidate={...candidate,topic:"The Laguna Copperplate Inscription",summary:"The oldest known written document connected to the Philippines.",storyAngle:"A nine-hundred-year-old artifact reveals a forgotten trading world.",keywords:["oldest","inscription","artifact"]};
+  assert.equal(new StoryFormatSelector().select(philippineHistory,historyCandidate),"hidden_history");
+});
 test("voice selector chooses energetic matching voice and fallback",()=>{const voices:VoiceProfile[]=[{id:"fast",provider:"x",languages:["en"],gender:"male",traits:["energetic","confident"],energy:.9,speed:1.08,intensity:.8,accents:["neutral"],costPerMillionCharactersUsd:0,dailyUsageLimit:null,priority:1,enabled:true},{id:"calm",provider:"x",languages:["en"],gender:"male",traits:["calm"],energy:.2,speed:.9,intensity:.2,accents:["neutral"],costPerMillionCharactersUsd:0,dailyUsageLimit:null,priority:1,enabled:true}];assert.equal(new VoiceSelector().select(profile,voices,"record_breaking_moment","en").selected.id,"fast")});
 test("semantic duplicate catches renamed same event",()=>{const detector=new DuplicateDetector();const history=[{id:"1",title:"The Football Match That Started a War",topic:"Football War",normalizedTopic:"football war",keywords:["football","war"],importantEntities:["Honduras","El Salvador"],events:["Football War"],storyAngle:"match triggered conflict",script:"A football match became linked to a war",contentEmbedding:detector.embedding("football match linked to Honduras El Salvador war")} as never];const next={...candidate,topic:"The Soccer Game That Caused a Real War",title:"Soccer Caused a War",summary:"A soccer match was linked to conflict",importantEntities:["Honduras","El Salvador"],events:["Football War"],keywords:["soccer","war"],storyAngle:"match triggered conflict"};assert.equal(detector.compare(next,history,.7).duplicate,true)});
 test("different angle can remain below strict threshold",()=>{const detector=new DuplicateDetector();const history=[{id:"1",title:"Match Started a War",topic:"Football War",normalizedTopic:"football war",keywords:["match","war"],importantEntities:["National Team"],events:["Football War"],storyAngle:"causes of war",contentEmbedding:detector.embedding("causes of the war")} as never];const next={...candidate,topic:"How the War Changed the National Football Team",importantEntities:["National Team"],events:["Postwar rebuilding"],storyAngle:"long term effect on players"};assert.equal(detector.compare(next,history,.85).duplicate,false)});
 test("metadata respects YouTube title limit",()=>assert.ok(new PlatformMetadataService().build({...candidate,title:"x".repeat(150)},profile,"youtube").title.length<=100));
+test("Philippine history metadata carries the series promise and focused tags",()=>{
+  const philippineHistory=new NicheConfigService().getNicheOrThrow("philippine_history");
+  const metadata=new PlatformMetadataService().build(candidate,philippineHistory,"youtube");
+  assert.match(metadata.description,/Hidden Philippine History/);
+  assert.ok(metadata.hashtags.includes("#historyshorts"));
+  assert.ok(metadata.hashtags.length<=5);
+});
 test("QC allows a render outside duration tolerance and records a warning",()=>{
   const result=new QualityControlService().check({
     content:{...candidate,script:"x",voiceId:"v",targetDurationSeconds:60} as never,
@@ -173,6 +197,37 @@ test("unified content and visual registries contain every supported mode",()=>{a
 test("final research fallback preserves safe Groq quota details for queue retry",async()=>{const post=mock.method(axios,"post",async()=>{throw{isAxiosError:true,message:"Request failed with status code 429",response:{status:429,data:{error:{message:"Rate limit reached",code:"rate_limit_exceeded"}},headers:{"retry-after":"75","x-ratelimit-limit-requests":"250","x-ratelimit-remaining-requests":"241","x-ratelimit-reset-requests":"51m","x-ratelimit-limit-tokens":"70000","x-ratelimit-remaining-tokens":"1200","x-ratelimit-reset-tokens":"48s"}}}});try{const service=new TopicResearchService("test-key","groq/compound-mini","https://api.groq.test/openai/v1",["qwen/qwen3.6-27b","openai/gpt-oss-20b"]);await assert.rejects(()=>service.generate({profile,language:"en",region:"US",recentTopics:[],recentEntities:[]}),error=>{assert.ok(error instanceof AppError);assert.equal(error.code,"GROQ_RATE_LIMITED");assert.match(error.message,/Automatic retries/);assert.deepEqual(error.details,{provider:"groq",providerCode:"rate_limit_exceeded",providerMessage:"Rate limit reached",retryAfter:"75",limitRequests:"250",remainingRequests:"241",resetRequests:"51m",limitTokens:"70000",remainingTokens:"1200",resetTokens:"48s"});return true});assert.equal(post.mock.callCount(),3)}finally{post.mock.restore()}});
 test("small Groq Compound 413 responses are translated into a retryable provider failure with safe diagnostics",async()=>{const post=mock.method(axios,"post",async()=>{throw{isAxiosError:true,message:"Request failed with status code 413",response:{status:413,data:{error:{message:"Request Entity Too Large",code:"request_too_large"}},headers:{"x-request-id":"req_413_test"}}}});try{const service=new TopicResearchService("test-key","groq/compound-mini","https://api.groq.test/openai/v1");await assert.rejects(()=>service.generate({profile,language:"en",region:"US",recentTopics:[],recentEntities:[]}),error=>{assert.ok(error instanceof AppError);assert.equal(error.code,"GROQ_COMPOUND_REQUEST_TOO_LARGE");assert.equal(error.statusCode,503);const details=error.details as Record<string,unknown>;assert.equal(details.provider,"groq");assert.equal(details.providerCode,"request_too_large");assert.equal(details.requestId,"req_413_test");assert.equal(typeof details.requestBodyBytes,"number");assert.ok(Number(details.requestBodyBytes)>0);assert.ok(Number(details.requestBodyBytes)<=65_536);return true})}finally{post.mock.restore()}});
 test("topic research defaults to three Compound Mini candidates and adds local embeddings",async()=>{const candidates=[0,1,2].map(index=>({...candidate,topic:`Topic ${index}`,title:`Title ${index}`}));const post=mock.method(axios,"post",async(url:string,body:unknown,config:{headers?:Record<string,string>})=>{const request=body as{model:string;messages:Array<{content:string}>;response_format:{type:string};compound_custom:{tools:{enabled_tools:string[]}}};assert.equal(url,"https://api.groq.test/openai/v1/chat/completions");assert.equal(request.model,"groq/compound-mini");assert.match(request.messages[0].content,/^Research 3 factual short-video topics/);assert.deepEqual(request.response_format,{type:"json_object"});assert.deepEqual(request.compound_custom.tools.enabled_tools,["web_search"]);assert.equal(config.headers?.Authorization,"Bearer test-key");assert.equal(config.headers?.["Groq-Model-Version"],"2025-07-23");return{data:{choices:[{message:{content:`\`\`json\n${JSON.stringify(candidates)}\n\`\``}}]}}});try{const service=new TopicResearchService("test-key","groq/compound-mini","https://api.groq.test/openai/v1/");const result=await service.generate({profile,language:"en",region:"US",recentTopics:[],recentEntities:[]});assert.equal(result.length,3);assert.equal(result[0].embedding?.length,96);assert.equal(post.mock.callCount(),1)}finally{post.mock.restore()}});
+test("Philippine history research prompt asks for immediate object-place-consequence packaging",async()=>{
+  const philippineHistory=new NicheConfigService().getNicheOrThrow("philippine_history");
+  const candidates=[0,1,2].map(index=>({...candidate,topic:`Philippine topic ${index}`,title:`Philippine title ${index}`}));
+  let prompt="";
+  const post=mock.method(axios,"post",async(_url:string,body:unknown)=>{
+    prompt=String((body as {messages:Array<{content:string}>}).messages[0].content);
+    return{data:{choices:[{message:{content:JSON.stringify({candidates})}}]}};
+  });
+  try{
+    await new TopicResearchService("test-key","groq/compound-mini","https://api.groq.test/openai/v1").generate({profile:philippineHistory,language:"en",region:"PH",recentTopics:[],recentEntities:[]});
+    assert.match(prompt,/recognizable object, place, artifact, event, or consequence/i);
+    assert.match(prompt,/Do not lead with an unfamiliar person's name/i);
+    assert.match(prompt,/40 to 55 seconds/i);
+  }finally{post.mock.restore()}
+});
+test("psychology research packages everyday behavior and rewrites academic titles",async()=>{
+  const psychology=new NicheConfigService().getNicheOrThrow("psychology");
+  const candidates=[0,1,2].map(index=>({...candidate,topic:`The Anchoring Effect in Decision Making ${index}`,title:"The Anchoring Effect in Decision Making"}));
+  let prompt="";
+  const post=mock.method(axios,"post",async(_url:string,body:unknown)=>{
+    prompt=String((body as {messages:Array<{content:string}>}).messages[0].content);
+    return{data:{choices:[{message:{content:JSON.stringify({candidates})}}]}};
+  });
+  try{
+    const result=await new TopicResearchService("test-key","groq/compound-mini","https://api.groq.test/openai/v1").generate({profile:psychology,language:"en",region:"GLOBAL",recentTopics:[],recentEntities:[]});
+    assert.match(prompt,/recognizable everyday behavior/i);
+    assert.match(prompt,/direct consequence/i);
+    assert.match(prompt,/Do not lead with academic concept names/i);
+    assert.equal(result[0].title,"The First Number You Hear Controls Your Decision");
+  }finally{post.mock.restore()}
+});
 test("research normalizes Groq source objects into URL strings",async()=>{
   const candidates=[0,1,2].map(index=>({
     ...candidate,
@@ -228,7 +283,26 @@ test("migration preserves history and archives the obsolete profile collection",
 
 test("project creation validates the account and persists the unified settings",async()=>{let saved:Record<string,unknown>|undefined;const repository={logActivity:async()=>({})};const projects={createAutomationProject:async(input:Record<string,unknown>)=>{saved=input;return{_id:"p1",id:"p1",userId:"u1"}}};const channels={findByIdAndUserId:async()=>({id:"a1",title:"Channel",externalChannelId:"youtube-1",status:"connected",refreshToken:"refresh"}),designateNicheIfFreeOrMatching:async()=>({id:"a1",nicheId:"world_history"})};const service=new AutomationService(repository as never,new NicheConfigService(),{} as never,channels as never,{} as never,projects as never,{} as never,{} as never,{} as never,{} as never);await service.createProject("u1",validProject as never);assert.equal(saved?.name,"Daily History");assert.equal(saved?.accountId,"account-1");assert.equal(saved?.automationMode,"approval_before_upload");assert.ok(saved?.nextRunAt instanceof Date)});
 test("complete project generation uses the shared renderer with automatic niche settings",async()=>{let historyInput:Record<string,unknown>|undefined;let started="";const repository={findByGenerationKey:async()=>null,findComparisonHistory:async()=>[],createHistory:async(input:Record<string,unknown>)=>{historyInput=input;return{id:"story-1"}},createRejected:async()=>({}),logActivity:async()=>({})};const root={id:"p1",_id:"p1",userId:"u1",projectType:"faceless_story",contentType:"FACELESS_NICHE",visualType:"AUTO",facelessSource:"daily_automation",internalStory:false,nicheId:"sports",accountId:"a1",timezone:"Asia/Manila",uploadTime:"19:00",language:"en",durationSeconds:60,storyFormatMode:"auto_select",automationMode:"approval_before_upload"};const projects={getProjectOrThrow:async()=>root,updateProject:async()=>root};const channels={findById:async()=>({id:"a1",title:"Sports Channel",status:"connected",refreshToken:"refresh"})};const faceless={createGeneratedStoryProject:async()=>({id:"render-1",_id:"render-1"}),startAutomation:async(id:string)=>{started=id;return{id}}};const research={generate:async()=>[candidate]};const service=new AutomationService(repository as never,new NicheConfigService(),research as never,channels as never,faceless as never,projects as never,{} as never,{} as never,{} as never,{} as never);const result=await service.execute("p1","2026-07-13");assert.equal(started,"render-1");assert.deepEqual(result.contentIds,["story-1"]);assert.equal(historyInput?.targetDurationSeconds,60);assert.equal(historyInput?.generationIdempotencyKey,"p1:2026-07-13:FACELESS_GENERATION");assert.ok(historyInput?.voiceId)});
-test("daily Reddit automation selects a fresh source and uses the Reddit story framework",async()=>{let renderInput:Record<string,unknown>|undefined;let historyInput:Record<string,unknown>|undefined;const activity:Record<string,unknown>[]=[];const repository={findByGenerationKey:async()=>null,findComparisonHistory:async()=>[],createHistory:async(input:Record<string,unknown>)=>{historyInput=input;return{id:"story-r",_id:"story-r"}},createRejected:async()=>({}),logActivity:async(input:Record<string,unknown>)=>{activity.push(input);return{}}};const root={id:"reddit-project",_id:"reddit-project",userId:"u1",projectType:"faceless_story",contentType:"REDDIT_STORY",visualType:"ANIMATED",facelessSource:"daily_automation",internalStory:false,accountId:"a1",timezone:"Asia/Manila",uploadTime:"19:00",language:"en",durationSeconds:60,automationMode:"approval_before_upload"};const projects={getProjectOrThrow:async()=>root,updateProject:async()=>root};const channels={findById:async()=>({id:"a1",title:"Reddit Channel",status:"connected",refreshToken:"refresh"})};const faceless={createGeneratedStoryProject:async(input:Record<string,unknown>)=>{renderInput=input;return{id:"render-r",_id:"render-r"}},startAutomation:async()=>({})};const record={id:"source-r",updateOne:async()=>({})};const reddit={select:async()=>({candidate,record,post:{subreddit:"AskReddit",title:"Pokeballs are real"}})};const service=new AutomationService(repository as never,new NicheConfigService(),{} as never,channels as never,faceless as never,projects as never,{} as never,{} as never,{} as never,{} as never,reddit as never);await service.execute("reddit-project","2026-07-13");assert.equal(renderInput?.facelessRenderMode,"background_video");assert.equal(renderInput?.contentType,"REDDIT_STORY");assert.equal(renderInput?.scriptFramework,"reddit_story");assert.equal(historyInput?.nicheId,"reddit:reddit-project");assert.equal(historyInput?.generationIdempotencyKey,"reddit-project:2026-07-13:REDDIT_FETCH");assert.match(String(activity[0]?.message),/r\/AskReddit: Pokeballs are real/)});
+test("Philippine history generation passes the retention strategy and research context to the renderer",async()=>{
+  let renderInput:Record<string,unknown>|undefined;
+  let historyInput:Record<string,unknown>|undefined;
+  const philippineCandidate={...candidate,topic:"The Laguna Copperplate Inscription",title:"The Oldest Philippine Document",summary:"A dated copperplate inscription reveals a forgotten trading world.",storyAngle:"A concrete artifact changes what people think they know about early Philippine history.",importantEntities:["Laguna Copperplate Inscription"],keywords:["oldest","artifact","philippine history"],sourceLinks:["https://example.org/primary","https://example.org/secondary"]};
+  const repository={findByGenerationKey:async()=>null,findComparisonHistory:async()=>[],createHistory:async(input:Record<string,unknown>)=>{historyInput=input;return{id:"story-ph"}},createRejected:async()=>({}),logActivity:async()=>({})};
+  const root={id:"p-ph",_id:"p-ph",userId:"u1",projectType:"faceless_story",contentType:"FACELESS_NICHE",visualType:"AUTO",facelessSource:"daily_automation",internalStory:false,nicheId:"philippine_history",accountId:"a1",timezone:"Asia/Manila",uploadTime:"09:00",language:"en",durationSeconds:60,storyFormatMode:"auto_select",automationMode:"approval_before_upload"};
+  const projects={getProjectOrThrow:async()=>root,updateProject:async()=>root};
+  const channels={findById:async()=>({id:"a1",title:"ST0RyFun",status:"connected",refreshToken:"refresh"})};
+  const faceless={createGeneratedStoryProject:async(input:Record<string,unknown>)=>{renderInput=input;return{id:"render-ph",_id:"render-ph"}},startAutomation:async()=>({})};
+  const research={generate:async()=>[philippineCandidate]};
+  const service=new AutomationService(repository as never,new NicheConfigService(),research as never,channels as never,faceless as never,projects as never,{} as never,{} as never,{} as never,{} as never);
+  await service.execute("p-ph","2026-07-14");
+  assert.equal(renderInput?.nicheId,"philippine_history");
+  assert.equal(renderInput?.targetDurationSeconds,50);
+  assert.match(String(renderInput?.sourceText),/Laguna Copperplate/);
+  assert.ok(["object_place_consequence","person_impact"].includes(String(renderInput?.experimentVariant)));
+  assert.equal(historyInput?.targetDurationSeconds,50);
+  assert.equal((historyInput?.metadata as {strategy?:{series?:string}})?.strategy?.series,"Hidden Philippine History");
+});
+test("daily Reddit automation selects a fresh source and uses the configured visual mode",async()=>{let renderInput:Record<string,unknown>|undefined;let historyInput:Record<string,unknown>|undefined;const activity:Record<string,unknown>[]=[];const repository={findByGenerationKey:async()=>null,findComparisonHistory:async()=>[],createHistory:async(input:Record<string,unknown>)=>{historyInput=input;return{id:"story-r",_id:"story-r"}},createRejected:async()=>({}),logActivity:async(input:Record<string,unknown>)=>{activity.push(input);return{}}};const root={id:"reddit-project",_id:"reddit-project",userId:"u1",projectType:"faceless_story",contentType:"REDDIT_STORY",visualType:"ANIMATED",facelessSource:"daily_automation",internalStory:false,accountId:"a1",timezone:"Asia/Manila",uploadTime:"19:00",language:"en",durationSeconds:60,automationMode:"approval_before_upload"};const projects={getProjectOrThrow:async()=>root,updateProject:async()=>root};const channels={findById:async()=>({id:"a1",title:"Reddit Channel",status:"connected",refreshToken:"refresh"})};const faceless={createGeneratedStoryProject:async(input:Record<string,unknown>)=>{renderInput=input;return{id:"render-r",_id:"render-r"}},startAutomation:async()=>({})};const record={id:"source-r",updateOne:async()=>({})};const reddit={select:async()=>({candidate,record,post:{subreddit:"AskReddit",title:"Pokeballs are real"}})};const service=new AutomationService(repository as never,new NicheConfigService(),{} as never,channels as never,faceless as never,projects as never,{} as never,{} as never,{} as never,{} as never,reddit as never);await service.execute("reddit-project","2026-07-13");assert.equal(renderInput?.facelessRenderMode,"animation_story");assert.equal(renderInput?.contentType,"REDDIT_STORY");assert.equal(renderInput?.scriptFramework,"reddit_story");assert.equal(historyInput?.nicheId,"reddit:reddit-project");assert.equal(historyInput?.generationIdempotencyKey,"reddit-project:2026-07-13:REDDIT_FETCH");assert.match(String(activity[0]?.message),/r\/AskReddit: Pokeballs are real/)});
 
 test("Generate Now makes the completed story due immediately",async()=>{
   let historyInput:Record<string,unknown>|undefined;
@@ -281,7 +355,8 @@ test("Reddit RSS selection continues when one subreddit is rate limited",async()
 const redditConfig={projectId:"p1",sourceMode:"MULTIPLE_SUBREDDITS",subreddits:["AskReddit"],sortMethod:"BEST_ELIGIBLE",minimumScore:10,minimumComments:2,minimumBodyLength:80,allowNSFW:false,includeComments:false,excludeLocked:true,contentFilters:[],attributionMode:"link",allowCrossAccountReuse:false} as never;
 const redditPost=(overrides:Partial<RedditPost>={}):RedditPost=>({id:"post-1",subreddit:"AskReddit",permalink:"https://reddit.test/post-1",title:"What unexpected secret did you discover?",body:"A complete emotional account ".repeat(20),author:"private_user",createdUtc:Date.now()/1000-3600,score:500,comments:80,nsfw:false,stickied:false,locked:false,removed:false,advertisement:false,...overrides});
 test("Reddit ranking filters deleted, pinned, NSFW, locked, and duplicate posts",()=>{const service=new RedditService({} as never);const posts=[redditPost(),redditPost({id:"deleted",removed:true}),redditPost({id:"pinned",stickied:true}),redditPost({id:"nsfw",nsfw:true}),redditPost({id:"locked",locked:true}),redditPost({id:"duplicate"})];const result=service.filterAndRank(posts,redditConfig,{ids:new Set(["duplicate"])});assert.deepEqual(result.map((item)=>item.id),["post-1"])});
-test("RSS posts remain eligible when score, comments, and body are unavailable",()=>{const service=new RedditService({} as never);const result=service.filterAndRank([redditPost({body:"RSS title only",score:0,comments:0,metadataAvailable:false,bodyAvailable:false})],redditConfig);assert.equal(result.length,1)});
+test("RSS posts without an original body are rejected before story generation",()=>{const service=new RedditService({} as never);const result=service.filterAndRank([redditPost({body:"RSS title only",score:0,comments:0,metadataAvailable:false,bodyAvailable:false})],redditConfig);assert.equal(result.length,0)});
+test("Reddit candidates require original post text",()=>{const service=new RedditService({} as never);assert.throws(()=>service.toCandidate(redditPost({body:"RSS title only",bodyAvailable:false})),(error:unknown)=>error instanceof AppError && error.code === "REDDIT_STORY_BODY_REQUIRED")});
 test("Reddit transformation anonymizes PII and labels claims as submissions",()=>{const service=new RedditService({} as never);const text=service.sanitize("u/realperson wrote real@example.com and +1 555 123 4567");assert.doesNotMatch(text,/realperson|real@example|555/);assert.match(service.toCandidate(redditPost()).summary,/Reddit user submitted/)});
 test("Reddit candidate topics include the post title",()=>{const service=new RedditService({} as never);const first=service.toCandidate(redditPost({id:"post-1",title:"A different personal story"}));const second=service.toCandidate(redditPost({id:"post-2",title:"Another personal story"}));assert.notEqual(first.topic,second.topic);assert.match(first.topic,/A different personal story/)});
 test("Reddit content hashes and source IDs are protected by unique indexes",()=>{const serialized=JSON.stringify(RedditSourceModel.schema.indexes());assert.match(serialized,/redditPostId/);assert.match(serialized,/permalink/);assert.match(serialized,/contentHash/)});
@@ -305,3 +380,87 @@ test("failed Reddit uniqueness checks reject the reserved source with the reason
 test("clip file and media validation rejects unsupported or corrupt input",()=>{assert.equal(isSupportedClipMime("video/mp4"),true);assert.equal(isSupportedClipMime("text/plain"),false);assert.equal(validateClipMedia({durationSeconds:60,width:1080,height:1920,hasAudio:true}),true);assert.equal(validateClipMedia({durationSeconds:0,width:1080,height:1920,hasAudio:true}),false);assert.equal(validateClipMedia({durationSeconds:60,width:1080,height:1920,hasAudio:false}),false)});
 test("clip upload idempotency is stable and account-specific",()=>{assert.equal(clipUploadIdempotencyKey("clip","account"),"clip:account:CLIP_UPLOAD");assert.notEqual(clipUploadIdempotencyKey("clip","a"),clipUploadIdempotencyKey("clip","b"))});
 test("clip queue has duplicate-file, schedule, status, and platform indexes",()=>{const serialized=JSON.stringify(QueuedClipModel.schema.indexes());assert.match(serialized,/sourceFileHash/);assert.match(serialized,/scheduledAt/);assert.match(serialized,/status/);assert.match(serialized,/platformVideoId/)});
+test("Philippine history generation reserves tomorrow's topic and passes its exact teaser",async()=>{
+  let renderInput:Record<string,unknown>|undefined;
+  const nextCandidate={...candidate,topic:"The Kingdom That Existed Before Manila",title:"Before Manila: The Kingdom History Forgot",summary:"A pre-Manila kingdom shaped an early trading world.",storyAngle:"A forgotten kingdom changes the story of Manila's beginnings.",importantEntities:["Ancient Kingdom"],keywords:["kingdom","manila","philippine history"]};
+  const checkpoints:Record<string,{researchCandidates:TopicCandidate[]}>= {};
+  const repository={
+    findByGenerationKey:async()=>null,
+    findComparisonHistory:async()=>[],
+    findCheckpoint:async(_projectId:string,date:string)=>checkpoints[date],
+    saveResearchCheckpoint:async(_projectId:string,date:string,researchCandidates:TopicCandidate[])=>{checkpoints[date]={researchCandidates};return checkpoints[date]},
+    createHistory:async()=>({id:"story-ph-next"}),
+    createRejected:async()=>({}),
+    logActivity:async()=>({})
+  };
+  const root={id:"p-ph-next",_id:"p-ph-next",userId:"u1",projectType:"faceless_story",contentType:"FACELESS_NICHE",visualType:"AUTO",facelessSource:"daily_automation",internalStory:false,nicheId:"philippine_history",accountId:"a1",timezone:"Asia/Manila",uploadTime:"09:00",language:"en",durationSeconds:60,storyFormatMode:"auto_select",automationMode:"approval_before_upload"};
+  const projects={getProjectOrThrow:async()=>root,updateProject:async()=>root};
+  const channels={findById:async()=>({id:"a1",title:"ST0RyFun",status:"connected",refreshToken:"refresh"})};
+  const faceless={createGeneratedStoryProject:async(input:Record<string,unknown>)=>{renderInput=input;return{id:"render-ph-next",_id:"render-ph-next"}},startAutomation:async()=>({})};
+  const research={generate:async()=>[candidate,nextCandidate]};
+  const service=new AutomationService(repository as never,new NicheConfigService(),research as never,channels as never,faceless as never,projects as never,{} as never,{} as never,{} as never,{} as never);
+  await service.execute("p-ph-next","2026-07-14");
+  assert.equal(renderInput?.nextStoryTitle,nextCandidate.title);
+  assert.equal(renderInput?.nextStoryTopic,nextCandidate.topic);
+  assert.deepEqual(checkpoints["2026-07-15"]?.researchCandidates,[nextCandidate]);
+});
+test("Philippine history refreshes research after consuming a reserved topic",async()=>{
+  const nextCandidate={...candidate,topic:"The Kingdom That Existed Before Manila",title:"Before Manila: The Kingdom History Forgot"};
+  const futureCandidate={...candidate,topic:"The Revolt Spain Tried to Erase",title:"The Filipino Revolt That Challenged Spain"};
+  const checkpoints:Record<string,{researchCandidates:TopicCandidate[]}>= {"2026-07-15":{researchCandidates:[nextCandidate]}};
+  const renderInputs:Record<string,unknown>[]=[];
+  let researchCalls=0;
+  const repository={
+    findByGenerationKey:async()=>null,
+    findComparisonHistory:async()=>[],
+    findCheckpoint:async(_projectId:string,date:string)=>checkpoints[date],
+    saveResearchCheckpoint:async(_projectId:string,date:string,researchCandidates:TopicCandidate[])=>{checkpoints[date]={researchCandidates};return checkpoints[date]},
+    createHistory:async()=>({id:"story-ph-chain"}),
+    createRejected:async()=>({}),
+    logActivity:async()=>({})
+  };
+  const root={id:"p-ph-chain",_id:"p-ph-chain",userId:"u1",projectType:"faceless_story",contentType:"FACELESS_NICHE",visualType:"AUTO",facelessSource:"daily_automation",internalStory:false,nicheId:"philippine_history",accountId:"a1",timezone:"Asia/Manila",uploadTime:"09:00",language:"en",durationSeconds:60,storyFormatMode:"auto_select",automationMode:"approval_before_upload"};
+  const projects={getProjectOrThrow:async()=>root,updateProject:async()=>root};
+  const channels={findById:async()=>({id:"a1",title:"ST0RyFun",status:"connected",refreshToken:"refresh"})};
+  const faceless={createGeneratedStoryProject:async(input:Record<string,unknown>)=>{renderInputs.push(input);return{id:`render-ph-chain-${renderInputs.length}`}},startAutomation:async()=>({})};
+  const research={generate:async()=>{researchCalls+=1;return researchCalls===1?[candidate,nextCandidate]:[futureCandidate]}};
+  const service=new AutomationService(repository as never,new NicheConfigService(),research as never,channels as never,faceless as never,projects as never,{} as never,{} as never,{} as never,{} as never);
+  await service.execute("p-ph-chain","2026-07-14");
+  await service.execute("p-ph-chain","2026-07-15");
+  assert.equal(renderInputs[1]?.nextStoryTitle,futureCandidate.title);
+  assert.deepEqual(checkpoints["2026-07-16"]?.researchCandidates,[futureCandidate]);
+});
+test("Philippine history projects share topic reservations per channel while isolating channels",async()=>{
+  const candidates=Array.from({length:6},(_,index)=>({...candidate,topic:`Philippine topic ${index+1}`,title:`Philippine title ${index+1}`,importantEntities:[`Entity ${index+1}`]}));
+  const reservations:Record<string,unknown>[]=[];
+  const renderTopics:Record<string,string>={};
+  const projectsById:Record<string,Record<string,unknown>>={};
+  const makeProject=(id:string,accountId:string)=>{const project={id,_id:id,userId:"u1",projectType:"faceless_story",contentType:"FACELESS_NICHE",visualType:"AUTO",facelessSource:"daily_automation",internalStory:false,nicheId:"philippine_history",accountId,timezone:"Asia/Manila",uploadTime:"09:00",language:"en",durationSeconds:60,storyFormatMode:"auto_select",automationMode:"approval_before_upload"};projectsById[id]=project;return project};
+  for(const id of ["ph-a-1","ph-a-2","ph-a-3"]) makeProject(id,"channel-a");
+  makeProject("ph-other-channel","channel-b");
+  const repository={
+    findByGenerationKey:async()=>null,
+    findComparisonHistory:async()=>[],
+    findCheckpoint:async()=>undefined,
+    saveResearchCheckpoint:async()=>({}),
+    findTopicReservations:async(accountId:string,nicheId:string)=>reservations.filter((item)=>item.accountId===accountId&&item.nicheId===nicheId),
+    reserveTopic:async(input:Record<string,unknown>)=>{
+      const duplicate=reservations.find((item)=>item.accountId===input.accountId&&item.nicheId===input.nicheId&&(item.normalizedTopic===input.normalizedTopic||item.normalizedTitle===input.normalizedTitle));
+      if(duplicate)return duplicate.generationIdempotencyKey===input.generationIdempotencyKey?duplicate:null;
+      reservations.push(input);return input;
+    },
+    createHistory:async(input:Record<string,unknown>)=>({id:`story-${String(input.projectId)}`}),
+    createRejected:async()=>({}),
+    logActivity:async()=>({})
+  };
+  const projects={getProjectOrThrow:async(id:string)=>projectsById[id],updateProject:async(id:string)=>projectsById[id]};
+  const channels={findById:async(accountId:string)=>({id:accountId,title:accountId,status:"connected",refreshToken:"refresh"})};
+  const faceless={createGeneratedStoryProject:async(input:Record<string,unknown>)=>{renderTopics[String(input.parentProjectId)]=String(input.topic);return{id:`render-${String(input.parentProjectId)}`}},startAutomation:async()=>({})};
+  const research={generate:async()=>candidates};
+  const service=new AutomationService(repository as never,new NicheConfigService(),research as never,channels as never,faceless as never,projects as never,{} as never,{} as never,{} as never,{} as never);
+  for(const id of ["ph-a-1","ph-a-2","ph-a-3","ph-other-channel"]) await service.execute(id,"2026-07-20");
+  const sameChannelTopics=[renderTopics["ph-a-1"],renderTopics["ph-a-2"],renderTopics["ph-a-3"]];
+  assert.equal(new Set(sameChannelTopics).size,3);
+  assert.equal(renderTopics["ph-other-channel"],candidates[0].topic);
+  assert.equal(reservations.filter((item)=>item.accountId==="channel-a").length,6);
+});

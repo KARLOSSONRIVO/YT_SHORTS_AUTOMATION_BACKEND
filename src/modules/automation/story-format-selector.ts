@@ -3,8 +3,11 @@ import type { NicheProfile, StoryFormat, TopicCandidate } from "./automation.typ
 const SIGNALS: Partial<Record<StoryFormat, string[]>> = {
   record_breaking_moment: ["record", "fastest", "highest", "first", "most"], controversy: ["controversy", "banned", "scandal", "disputed"],
   mystery_reveal: ["mystery", "hidden", "discovered", "evidence"], unsolved_mystery: ["unsolved", "missing", "unknown", "unexplained"],
-  rise_and_fall: ["rise", "fall", "empire", "collapse", "career"], hero_story: ["hero", "rescued", "saved", "courage"],
-  tragedy: ["tragedy", "died", "disaster", "loss"], myth_versus_fact: ["myth", "believed", "actually", "misconception"],
+  hidden_history: ["hidden", "forgotten", "oldest", "ancient", "lost", "before", "precolonial", "inscription", "artifact"],
+  what_really_happened: ["what really", "truth", "evidence", "actually", "history remembers"],
+  myth_versus_fact: ["myth", "legend", "oral tradition", "actually", "not just", "misconception", "believed"],
+  rise_and_fall: ["rise", "fall", "empire", "collapse", "career"], hero_story: ["hero", "heroine", "revolution", "resisted", "defied", "fought", "courage"],
+  tragedy: ["tragedy", "died", "disaster", "loss"],
   psychological_explanation: ["psychology", "brain", "behavior", "bias", "habit"],
   one_decision_changed_everything: ["decision", "choice", "order", "refused"], rivalry: ["rival", "versus", "competition", "feud"]
 };
@@ -21,7 +24,7 @@ export class StoryFormatSelector {
       .sort((a, b) => b.score - a.score)[0]?.format ?? profile.preferredStoryFormats[0];
   }
 
-  public framework(format: StoryFormat): "psychology_truth" | "history_story" {
-    return format === "psychological_explanation" ? "psychology_truth" : "history_story";
+  public framework(format: StoryFormat, nicheId?: string): "psychology_truth" | "history_story" {
+    return nicheId === "psychology" || format === "psychological_explanation" ? "psychology_truth" : "history_story";
   }
 }

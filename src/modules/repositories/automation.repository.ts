@@ -2,7 +2,21 @@ import { ContentHistoryModel, type ContentHistory, type ContentHistoryDocument }
 import { ProjectActivityModel, type ProjectActivity } from "../models/project-activity.model";
 import { RejectedTopicModel, type RejectedTopic } from "../models/rejected-topic.model";
 import { AutomationCheckpointModel } from "../models/automation-checkpoint.model";
+import { TopicReservationModel, type TopicReservation, type TopicReservationDocument } from "../models/topic-reservation.model";
 import type { TopicCandidate } from "../automation/automation.types";
+
+export interface TopicReservationInput {
+  projectId: string;
+  accountId: string;
+  nicheId: string;
+  scheduledDate: string;
+  role: "current" | "next";
+  generationIdempotencyKey: string;
+  topic: string;
+  title: string;
+  normalizedTopic: string;
+  normalizedTitle: string;
+}
 
 export class AutomationRepository {
   findCheckpoint(projectId: string, scheduledDate: string) { return AutomationCheckpointModel.findOne({ projectId, scheduledDate }).lean().exec(); }
@@ -48,6 +62,26 @@ export class AutomationRepository {
   findHistoryForProject(projectId: string, limit = 100) { return ContentHistoryModel.find({ projectId }).sort({ createdAt: -1 }).limit(limit).exec(); }
   findTodayForProject(projectId: string, start: Date, end: Date) { return ContentHistoryModel.find({ projectId, createdAt: { $gte: start, $lt: end } }).sort({ createdAt: -1 }).exec(); }
   findComparisonHistory(nicheId: string, accountId: string, limit = 500) { return ContentHistoryModel.find({ nicheId, accountId, status: { $ne: "rejected" } }).sort({ createdAt: -1 }).limit(limit).exec(); }
+  findTopicReservations(accountId: string, nicheId: string, limit = 500) {
+    return TopicReservationModel.find({ accountId, nicheId }).sort({ createdAt: -1 }).limit(limit).lean().exec();
+  }
+  async reserveTopic(input: TopicReservationInput): Promise<TopicReservationDocument | null> {
+    try {
+      return await TopicReservationModel.create(input as unknown as TopicReservation);
+    } catch (error) {
+      const duplicateKey = typeof error === "object" && error !== null && "code" in error && error.code === 11000;
+      if (!duplicateKey) throw error;
+      const existing = await TopicReservationModel.findOne({
+        accountId: input.accountId,
+        nicheId: input.nicheId,
+        $or: [{ normalizedTopic: input.normalizedTopic }, { normalizedTitle: input.normalizedTitle }]
+      }).exec();
+      return existing?.generationIdempotencyKey === input.generationIdempotencyKey ? existing : null;
+    }
+  }
+  releaseTopicReservations(generationIdempotencyKey: string) {
+    return TopicReservationModel.deleteMany({ generationIdempotencyKey }).exec();
+  }
   findPendingFinalization(limit = 50) { return ContentHistoryModel.find({ status: { $in: ["queued", "researching", "writing", "generating_voice", "generating_visuals", "rendering", "quality_check", "scheduled"] }, renderProjectId: { $exists: true }, $or: [{ nextRetryAt: { $exists: false } }, { nextRetryAt: { $lte: new Date() } }] }).sort({ createdAt: 1 }).limit(limit).exec(); }
   countUploadedSince(accountId: string, since: Date) { return ContentHistoryModel.countDocuments({ accountId, status: "uploaded", uploadDate: { $gte: since } }).exec(); }
   claimUpload(id: string) { return ContentHistoryModel.findOneAndUpdate({ _id: id, status: { $in: ["scheduled", "awaiting_approval"] }, platformVideoId: { $exists: false } }, { $set: { status: "uploading" }, $inc: { uploadAttempts: 1 } }, { new: true }).exec(); }
@@ -58,6 +92,7 @@ export class AutomationRepository {
   deleteProjectData(projectId: string) { return Promise.all([
     ContentHistoryModel.deleteMany({ projectId }).exec(),
     RejectedTopicModel.deleteMany({ projectId }).exec(),
-    ProjectActivityModel.deleteMany({ projectId }).exec()
+    ProjectActivityModel.deleteMany({ projectId }).exec(),
+    TopicReservationModel.deleteMany({ projectId }).exec()
   ]); }
 }

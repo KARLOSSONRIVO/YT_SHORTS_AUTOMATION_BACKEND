@@ -49,7 +49,7 @@
       "contentRestrictions": ["Prefer Philippine archives, museums, universities, and government sources", "Label legends and oral traditions clearly"],
       "preferredTopicCategories": ["forgotten Filipino heroes", "historical mysteries", "important events", "unusual facts", "Philippine legends"],
       "preferredStoryFormats": ["hero_story", "hidden_history", "mystery_reveal", "what_really_happened", "myth_versus_fact"],
-      "hashtagCategories": ["philippines", "philippine_history", "pinoy_history", "filipino"],
+      "hashtagCategories": ["philippines", "philippinehistory", "historyshorts", "filipinohistory"],
       "language": "en",
       "region": "PH"
     },

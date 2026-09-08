@@ -15,6 +15,9 @@ export const STORY_FORMATS = [
 ] as const;
 export type StoryFormat = (typeof STORY_FORMATS)[number];
 
+export const PHILIPPINE_HISTORY_VARIANTS = ["object_place_consequence", "person_impact"] as const;
+export type PhilippineHistoryVariant = (typeof PHILIPPINE_HISTORY_VARIANTS)[number];
+
 export interface VoicePreference {
   gender?: "female" | "male" | "neutral";
   energy: number;

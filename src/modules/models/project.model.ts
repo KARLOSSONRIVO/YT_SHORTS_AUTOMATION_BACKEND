@@ -55,6 +55,10 @@ export interface Project {
   lastSuccessfulGenerationAt?: Date;
   lastUploadAt?: Date;
   topic?: string;
+  sourceText?: string;
+  experimentVariant?: string;
+  nextStoryTitle?: string;
+  nextStoryTopic?: string;
   platforms: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
@@ -159,6 +163,10 @@ const projectSchema = new Schema<Project>(
     lastSuccessfulGenerationAt: Date,
     lastUploadAt: Date,
     topic: { type: String, trim: true },
+    sourceText: { type: String, trim: true },
+    experimentVariant: { type: String, trim: true },
+    nextStoryTitle: { type: String, trim: true },
+    nextStoryTopic: { type: String, trim: true },
     platforms: {
       type: [String],
       enum: ["youtube", "tiktok"],

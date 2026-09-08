@@ -364,6 +364,10 @@ export class PythonWorkerClient {
     targetDurationSeconds?: number;
     stylePreset?: string;
     audience?: string;
+    nicheId?: string;
+    experimentVariant?: string;
+    nextStoryTitle?: string;
+    nextStoryTopic?: string;
     scriptFramework?: "psychology_truth" | "history_story" | "reddit_story";
     sourceText?: string;
     storyFormat?: string;
@@ -379,6 +383,10 @@ export class PythonWorkerClient {
       target_duration_seconds: input.targetDurationSeconds,
       style_preset: input.stylePreset,
       audience: input.audience,
+      niche_id: input.nicheId,
+      experiment_variant: input.experimentVariant,
+      next_story_title: input.nextStoryTitle,
+      next_story_topic: input.nextStoryTopic,
       script_framework: input.scriptFramework,
       source_text: input.sourceText,
       story_format: input.storyFormat

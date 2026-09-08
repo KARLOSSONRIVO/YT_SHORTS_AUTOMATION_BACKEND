@@ -191,11 +191,12 @@ export class RedditService {
   }
 
   public toCandidate(post: RedditPost, sanitized = this.sanitize(post.title + '. ' + post.body)): TopicCandidate {
+    if (post.bodyAvailable === false || !post.body.trim()) {
+      throw new AppError('The original Reddit submission text is required before generating a story.', 409, 'REDDIT_STORY_BODY_REQUIRED');
+    }
     const title = this.sanitize(post.title).slice(0, 100);
     const words = sanitized.split(/\s+/).slice(0, 170).join(' ');
-    const summary = post.bodyAvailable === false
-      ? 'A Reddit RSS entry was found with this title, but the feed did not include the original post body: ' + this.sanitize(post.title)
-      : 'A Reddit user submitted this personal account: ' + words;
+    const summary = 'A Reddit user submitted this personal account: ' + words;
     return {
       topic: 'Reddit submission from r/' + post.subreddit + ': ' + title, title,
       summary, storyAngle: 'Retell as an anonymized, unverified personal account',
@@ -222,7 +223,7 @@ export class RedditService {
       const normalized = this.normalize(this.sanitize(post.title + ' ' + post.body));
       return !post.stickied && !post.advertisement && !post.removed && (!config.excludeLocked || !post.locked) &&
         (config.allowNSFW || !post.nsfw) && (post.metadataAvailable === false || (post.score >= config.minimumScore && post.comments >= config.minimumComments)) &&
-        (post.bodyAvailable === false || post.body.length >= config.minimumBodyLength) && !usedIds.has(post.id) && !usedLinks.has(post.permalink) &&
+        post.bodyAvailable !== false && post.body.trim().length >= config.minimumBodyLength && !usedIds.has(post.id) && !usedLinks.has(post.permalink) &&
         !usedHashes.has(hash) && !(used.texts??[]).some((text)=>this.similarity(normalized, this.normalize(text)) >= 0.82) &&
         !this.unsafe(post.title + ' ' + post.body);
     }).sort((a, b) => this.score(b) - this.score(a));

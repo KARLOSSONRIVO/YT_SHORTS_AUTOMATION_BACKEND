@@ -14,13 +14,13 @@ import { PlatformMetadataService } from "./metadata.service";
 import { QualityControlService } from "./quality-control.service";
 import { ScheduleService } from "./schedule.service";
 import { StoryFormatSelector } from "./story-format-selector";
-import { TopicResearchService } from "./topic-research.service";
+import { normalizeTopicCandidate, TopicResearchService } from "./topic-research.service";
 import { TopicRotationService } from "./topic-rotation.service";
 import { VoiceSelector } from "./voice-selector";
 import { MediaInspectionService } from "./media-inspection.service";
 import { isQueuedWorkflowFailure, isRateLimitFailure, isTemporaryFailure, retryDelayMs } from "./retry-policy";
 import type { AutomationRunCoordinator } from "./automation-run-coordinator";
-import type { AutomationMode, StoryFormat, TopicCandidate } from "./automation.types";
+import type { AutomationMode, PhilippineHistoryVariant, StoryFormat, TopicCandidate } from "./automation.types";
 import type { ContentType, VisualType } from "./automation.types";
 import type { RedditService } from "../services/reddit/reddit.service";
 import type { ClipQueueService } from "../services/clipQueue/clip-queue.service";
@@ -52,6 +52,52 @@ export const projectDailyIdempotencyKey = (projectId: string, scheduledDate: str
   projectId + ":" + scheduledDate + ":" + (contentType === "REDDIT_STORY" ? "REDDIT_FETCH" : contentType === "CLIP_UPLOAD" ? "CLIP_UPLOAD" : "FACELESS_GENERATION");
 export const bullmqJobId = (idempotencyKey: string) => idempotencyKey.replaceAll(":", "_");
 export const automationRetryOptions = () => ({ attempts: 1000, backoff: { type: "provider-rate-limit" as const } });
+
+const PHILIPPINE_HISTORY_NICHE_ID = "philippine_history";
+const PHILIPPINE_HISTORY_SERIES = "Hidden Philippine History";
+const PSYCHOLOGY_NICHE_ID = "psychology";
+const PSYCHOLOGY_TARGET_DURATION_SECONDS = 45;
+
+export const automationTargetDuration = (
+  contentType: ContentType,
+  nicheId: string | undefined,
+  configuredDurationSeconds: number
+) => {
+  if (contentType !== "FACELESS_NICHE") return configuredDurationSeconds;
+  if (nicheId === PHILIPPINE_HISTORY_NICHE_ID) return 50;
+  if (nicheId === PSYCHOLOGY_NICHE_ID) return PSYCHOLOGY_TARGET_DURATION_SECONDS;
+  return configuredDurationSeconds;
+};
+
+const philippineHistoryVariantForDate = (scheduledDate: string): PhilippineHistoryVariant => {
+  const dayIndex = Math.floor(Date.parse(`${scheduledDate}T00:00:00Z`) / 86_400_000);
+  return Math.abs(dayIndex) % 2 === 0 ? "object_place_consequence" : "person_impact";
+};
+
+const buildPhilippineHistorySourceText = (candidate: TopicCandidate) => [
+  `Research summary: ${candidate.summary}`,
+  `Story angle: ${candidate.storyAngle}`,
+  candidate.importantEntities.length ? `Important entities: ${candidate.importantEntities.join(", ")}` : "",
+  candidate.dates.length ? `Dates: ${candidate.dates.join(", ")}` : "",
+  candidate.events.length ? `Events: ${candidate.events.join(", ")}` : "",
+  candidate.sourceLinks.length ? `Authoritative sources: ${candidate.sourceLinks.join("\n")}` : ""
+].filter(Boolean).join("\n");
+
+const nextDailyDateKey = (scheduledDate: string): string => {
+  const next = new Date(`${scheduledDate}T12:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+};
+
+type TopicReservationRecord = {
+  projectId: unknown;
+  scheduledDate: string;
+  generationIdempotencyKey: string;
+  topic: string;
+  title: string;
+  normalizedTopic?: string;
+  normalizedTitle?: string;
+};
 
 export class AutomationService {
   private static readonly GENERATION_LEAD_MINUTES = 180;
@@ -166,6 +212,7 @@ export class AutomationService {
       return this.clipQueue.uploadNextDue(projectId);
     }
     this.assertAutomationProject(project);
+    const isPhilippineHistory = project.contentType === "FACELESS_NICHE" && project.nicheId === PHILIPPINE_HISTORY_NICHE_ID;
     const date = scheduledDate ?? this.schedules.localDateKey(project.timezone!);
     const generationIdempotencyKey = projectDailyIdempotencyKey(projectId, date, project.contentType);
     const automationRunId = runId ?? generationIdempotencyKey;
@@ -173,6 +220,7 @@ export class AutomationService {
     const startHeartbeat = () => coordinator
       ? setInterval(() => { void coordinator.touch(projectId, automationRunId).catch(() => undefined); }, 30_000)
       : undefined;
+    let historyCreated = false;
     const existing = await this.repository.findByGenerationKey(generationIdempotencyKey);
     if (existing) {
       const canResume = existing.status === "rendering"
@@ -202,24 +250,59 @@ export class AutomationService {
     await this.projects.updateProject(projectId, { automationStatus: "running", lastRunAt: new Date() });
     const historyNicheId = project.contentType === "REDDIT_STORY" ? "reddit:" + projectId : project.nicheId!;
     const history = await this.repository.findComparisonHistory(historyNicheId, String(project.accountId));
+    const topicReservations: TopicReservationRecord[] = isPhilippineHistory && typeof this.repository.findTopicReservations === "function"
+      ? await this.repository.findTopicReservations(String(project.accountId), PHILIPPINE_HISTORY_NICHE_ID) as unknown as TopicReservationRecord[]
+      : [];
     const redditSelection = project.contentType === "REDDIT_STORY" ? await this.reddit?.select(projectId, String(project.accountId)) : undefined;
     if (project.contentType === "REDDIT_STORY" && !redditSelection)
       throw new AppError("Reddit automation is unavailable.", 503, "REDDIT_NOT_CONFIGURED");
     const checkpoint = await this.repository.findCheckpoint?.(projectId, date);
-    let candidates = redditSelection ? [redditSelection.candidate] : checkpoint?.researchCandidates;
-    const generateCandidates = async (): Promise<TopicCandidate[]> => {
+    let candidates = redditSelection
+      ? [redditSelection.candidate]
+      : checkpoint?.researchCandidates?.map((candidate) => normalizeTopicCandidate(candidate)).filter((candidate): candidate is TopicCandidate => candidate !== null);
+    if (isPhilippineHistory && candidates) candidates = this.excludeReservedPhilippineHistoryCandidates(candidates, topicReservations, projectId, date);
+    const generateCandidates = async (avoidTopics: string[] = []): Promise<TopicCandidate[]> => {
       const generated = await this.research.generate({ profile, language: project.language!, region: profile.region,
-        recentTopics: history.map((item) => item.topic), recentEntities: history.flatMap((item) => item.importantEntities) });
-      candidates = generated;
+        recentTopics: [...new Set([
+          ...avoidTopics,
+          ...topicReservations.flatMap((reservation) => [reservation.topic, reservation.title]),
+          ...history.map((item) => item.topic)
+        ])].slice(0, 50),
+        recentEntities: history.flatMap((item) => item.importantEntities) });
+      candidates = isPhilippineHistory
+        ? this.excludeReservedPhilippineHistoryCandidates(generated, topicReservations, projectId, date)
+        : generated;
       await this.repository.saveResearchCheckpoint?.(projectId, date, generated);
-      return generated;
+      return candidates;
     };
     if (!candidates?.length) {
       await generateCandidates();
     }
+    const selectCandidate = async (availableCandidates: TopicCandidate[]): Promise<TopicCandidate> => {
+      let remaining = availableCandidates;
+      while (remaining.length) {
+        const next = await this.chooseCandidate(project, remaining, history);
+        if (!isPhilippineHistory) return next;
+        const reservation = await this.reservePhilippineHistoryTopic(
+          projectId,
+          project,
+          date,
+          "current",
+          generationIdempotencyKey,
+          next,
+          topicReservations
+        );
+        if (reservation) {
+          this.addTopicReservation(topicReservations, reservation);
+          return next;
+        }
+        remaining = remaining.filter((candidate) => !this.sameTopicOrTitle(candidate, next));
+      }
+      throw new AppError("No unreserved Philippine-history topic is available for this channel.", 409, "NO_UNIQUE_TOPICS");
+    };
     let selected: TopicCandidate;
     try {
-      selected = await this.chooseCandidate(project, candidates ?? [], history);
+      selected = await selectCandidate(candidates ?? []);
     } catch (error) {
       if (redditSelection && error instanceof AppError && error.code === "NO_UNIQUE_TOPICS") {
         const details = error.details as { reasons?: unknown } | undefined;
@@ -229,23 +312,59 @@ export class AutomationService {
       }
       if (!redditSelection && error instanceof AppError && error.code === "NO_UNIQUE_TOPICS") {
         await this.repository.clearCheckpoint?.(projectId, date);
-        const refreshedCandidates = await generateCandidates();
-        selected = await this.chooseCandidate(project, refreshedCandidates, history);
+        const rejectedTopics = (candidates ?? []).flatMap((candidate) => [candidate.topic, candidate.title]).filter(Boolean);
+        const refreshedCandidates = await generateCandidates(rejectedTopics);
+        selected = await selectCandidate(refreshedCandidates);
       } else {
         throw error;
       }
     }
     const storyFormat = this.formats.select(profile, selected, { mode: "auto_select", allowed: project.allowedStoryFormats });
     const voice = this.voices.select(profile, this.config.listVoices(), storyFormat, project.language!);
+    const targetDurationSeconds = automationTargetDuration(project.contentType, project.nicheId, project.durationSeconds ?? 60);
+    const experimentVariant = isPhilippineHistory ? philippineHistoryVariantForDate(date) : undefined;
+    const sourceText = isPhilippineHistory ? buildPhilippineHistorySourceText(selected) : undefined;
+    let nextCandidate = isPhilippineHistory
+      ? await this.reservePhilippineHistoryNextCandidate(projectId, project, date, candidates ?? [], selected, history, generationIdempotencyKey, topicReservations)
+      : undefined;
+    if (isPhilippineHistory && !nextCandidate) {
+      try {
+        const refreshedNextCandidates = await this.research.generate({
+          profile,
+          language: project.language!,
+          region: profile.region,
+          recentTopics: [...new Set([
+            selected.topic,
+            ...topicReservations.flatMap((reservation) => [reservation.topic, reservation.title]),
+            ...history.map((item) => item.topic)
+          ])].slice(0, 50),
+          recentEntities: [...new Set([...selected.importantEntities, ...history.flatMap((item) => item.importantEntities)])].slice(0, 50)
+        });
+        nextCandidate = await this.reservePhilippineHistoryNextCandidate(
+          projectId,
+          project,
+          date,
+          refreshedNextCandidates,
+          selected,
+          history,
+          generationIdempotencyKey,
+          topicReservations
+        );
+      } catch {
+        // The current story can still be generated with the generic series promise.
+        nextCandidate = undefined;
+      }
+    }
     if (redditSelection) await this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "reddit_source_selected", severity: "info",
       message: `Selected Reddit source from r/${redditSelection.post.subreddit}: ${redditSelection.post.title}`,
       metadata: { redditSourceId: redditSelection.record.id, subreddit: redditSelection.post.subreddit, title: redditSelection.post.title } });
+    const facelessRenderMode = this.resolveVisualType(project.visualType ?? "AUTO", selected, profile.visualPreferences);
     const renderProject = await this.faceless.createGeneratedStoryProject({ parentProjectId: projectId, userId: String(project.userId), topic: selected.topic,
-      title: selected.title, description: selected.summary, platforms: ["youtube"], targetDurationSeconds: project.durationSeconds ?? 60,
-      stylePreset: profile.visualStyle, scriptFramework: project.contentType === "REDDIT_STORY" ? "reddit_story" : this.formats.framework(storyFormat),
-      facelessRenderMode: project.contentType === "REDDIT_STORY"
-        ? "background_video"
-        : this.resolveVisualType(project.visualType ?? "AUTO", selected, profile.visualPreferences),
+      title: selected.title, description: selected.summary, sourceText, nicheId: project.nicheId, experimentVariant,
+      nextStoryTitle: nextCandidate?.title, nextStoryTopic: nextCandidate?.topic,
+      platforms: ["youtube"], targetDurationSeconds,
+      stylePreset: profile.visualStyle, scriptFramework: project.contentType === "REDDIT_STORY" ? "reddit_story" : this.formats.framework(storyFormat, project.nicheId),
+      facelessRenderMode,
       voice: voice.selected.id, tone: profile.tones.join(", "), audience: profile.targetAudience.join(", "), language: project.language,
       contentType: project.contentType,
       storyFormat, speakingRate: voice.selected.speed, fallbackVoice: voice.fallback?.id });
@@ -258,13 +377,21 @@ export class AutomationService {
       dates: selected.dates, events: selected.events, keywords: selected.keywords, sourceLinks: selected.sourceLinks, storyAngle: selected.storyAngle,
       storyFormat, tone: profile.tones.join(", "), targetAudience: profile.targetAudience, visualStyle: profile.visualStyle,
       voiceId: voice.selected.id, fallbackVoiceId: voice.fallback?.id, language: project.language!, region: profile.region,
-      targetDurationSeconds: project.durationSeconds ?? 60, contentEmbedding: selected.embedding ?? this.duplicate.embedding(`${selected.topic} ${selected.summary} ${selected.storyAngle}`),
+      targetDurationSeconds, contentEmbedding: selected.embedding ?? this.duplicate.embedding(`${selected.topic} ${selected.summary} ${selected.storyAngle}`),
       status: "rendering", scheduledUploadTime, platform: "youtube", generationIdempotencyKey,
       uploadIdempotencyKey: workflowIdempotencyKey(projectId, date, "upload"), uploadAttempts: 0, generationAttempts: 1,
       metadata: { candidate: selected, contentRestrictions: profile.contentRestrictions, hashtagCategories: profile.hashtagCategories,
         researchRequirements: profile.researchRequirements,
-        visualStrategy: project.contentType === "REDDIT_STORY" ? "background_video" : project.visualType === "ANIMATED" ? "ai_animated" : "ai_generated",
-        contentType: project.contentType, redditSourceId: redditSelection?.record.id, assignedAccount: channel.title, automationRunId } };
+        visualStrategy: facelessRenderMode === "animation_story" ? "ai_animated" : "ai_generated",
+        contentType: project.contentType, redditSourceId: redditSelection?.record.id, assignedAccount: channel.title, automationRunId,
+        strategy: isPhilippineHistory ? {
+          series: PHILIPPINE_HISTORY_SERIES,
+          variant: experimentVariant,
+          titleRule: "recognizable_object_place_event_or_consequence",
+          hookRule: "immediate_first_sentence",
+          targetDurationSeconds,
+          nextStory: nextCandidate ? { date: nextDailyDateKey(date), title: nextCandidate.title, topic: nextCandidate.topic } : undefined
+        } : undefined } };
     const historyResult = typeof this.repository.createHistoryIdempotent === "function"
       ? await this.repository.createHistoryIdempotent(historyInput)
       : { content: await this.repository.createHistory(historyInput), created: true };
@@ -272,12 +399,16 @@ export class AutomationService {
     if (!historyResult.created) {
       return { contentIds: [content.id], projectId, duplicateJob: true };
     }
+    historyCreated = true;
     if (redditSelection) await redditSelection.record.updateOne({ storyId: content._id, status: "transformed", generatedTitle: selected.title, summary: selected.summary });
     await this.faceless.startAutomation(renderProject.id);
     await this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "generation_started", severity: "info",
       message: `Started a unique ${storyFormat.replaceAll("_", " ")} story: ${selected.title}`, metadata: { contentId: content.id, renderProjectId: renderProject.id } });
     return { contentIds: [content.id], projectId, renderProjectId: renderProject.id, topic: selected.topic, storyFormat, voiceId: voice.selected.id };
     } catch (error) {
+      if (isPhilippineHistory && !historyCreated && typeof this.repository.releaseTopicReservations === "function") {
+        await this.repository.releaseTopicReservations(generationIdempotencyKey).catch(() => undefined);
+      }
       if (!isRateLimitFailure(error)) await this.coordinator?.finish(projectId, automationRunId);
       throw error;
     } finally {
@@ -516,6 +647,150 @@ export class AutomationService {
     if (!accepted.length) throw new AppError("No sufficiently unique topic survived duplicate and rotation checks.", 409, "NO_UNIQUE_TOPICS", { reasons: [...new Set(rejectionReasons)] });
     const weight = (candidate: TopicCandidate) => Object.values(candidate.scores).reduce((sum, score) => sum + score, 0) + candidate.factualConfidence;
     return accepted.sort((a, b) => weight(b) - weight(a))[0];
+  }
+
+  private sameTopicOrTitle(first: TopicCandidate, second: TopicCandidate) {
+    return normalizeText(first.topic) === normalizeText(second.topic)
+      || normalizeText(first.title) === normalizeText(second.title);
+  }
+
+  private reservationMatchesCandidate(reservation: TopicReservationRecord, candidate: TopicCandidate) {
+    return normalizeText(reservation.normalizedTopic ?? reservation.topic) === normalizeText(candidate.topic)
+      || normalizeText(reservation.normalizedTitle ?? reservation.title) === normalizeText(candidate.title);
+  }
+
+  private isReservedForAnotherProject(
+    reservation: TopicReservationRecord,
+    projectId: string,
+    scheduledDate: string
+  ) {
+    return String(reservation.projectId) !== projectId || reservation.scheduledDate !== scheduledDate;
+  }
+
+  private excludeReservedPhilippineHistoryCandidates(
+    candidates: TopicCandidate[],
+    reservations: TopicReservationRecord[],
+    projectId: string,
+    scheduledDate: string
+  ) {
+    return candidates.filter((candidate) => !reservations.some((reservation) =>
+      this.reservationMatchesCandidate(reservation, candidate)
+      && this.isReservedForAnotherProject(reservation, projectId, scheduledDate)));
+  }
+
+  private addTopicReservation(reservations: TopicReservationRecord[], reservation: TopicReservationRecord) {
+    if (!reservations.some((existing) =>
+      existing.generationIdempotencyKey === reservation.generationIdempotencyKey
+      && existing.topic === reservation.topic
+      && existing.title === reservation.title)) {
+      reservations.push(reservation);
+    }
+  }
+
+  private async reservePhilippineHistoryTopic(
+    projectId: string,
+    project: ProjectDocument,
+    scheduledDate: string,
+    role: "current" | "next",
+    generationIdempotencyKey: string,
+    candidate: TopicCandidate,
+    reservations: TopicReservationRecord[]
+  ): Promise<TopicReservationRecord | null> {
+    const existing = reservations.find((reservation) =>
+      this.reservationMatchesCandidate(reservation, candidate)
+      && String(reservation.projectId) === projectId
+      && reservation.scheduledDate === scheduledDate);
+    if (existing) return existing;
+
+    if (typeof this.repository.reserveTopic !== "function") {
+      return {
+        projectId,
+        scheduledDate,
+        generationIdempotencyKey,
+        topic: candidate.topic,
+        title: candidate.title,
+        normalizedTopic: normalizeText(candidate.topic),
+        normalizedTitle: normalizeText(candidate.title)
+      };
+    }
+
+    const reservation = await this.repository.reserveTopic({
+      projectId,
+      accountId: String(project.accountId),
+      nicheId: PHILIPPINE_HISTORY_NICHE_ID,
+      scheduledDate,
+      role,
+      generationIdempotencyKey,
+      topic: candidate.topic,
+      title: candidate.title,
+      normalizedTopic: normalizeText(candidate.topic),
+      normalizedTitle: normalizeText(candidate.title)
+    });
+    return reservation ? reservation as unknown as TopicReservationRecord : null;
+  }
+
+  private async reservePhilippineHistoryNextCandidate(
+    projectId: string,
+    project: ProjectDocument,
+    scheduledDate: string,
+    candidates: TopicCandidate[],
+    selected: TopicCandidate,
+    history: Awaited<ReturnType<AutomationRepository["findComparisonHistory"]>>,
+    generationIdempotencyKey: string,
+    reservations: TopicReservationRecord[]
+  ) {
+    const nextDate = nextDailyDateKey(scheduledDate);
+    const existingCheckpoint = await this.repository.findCheckpoint?.(projectId, nextDate);
+    const existingCandidate = existingCheckpoint?.researchCandidates
+      ?.map((candidate) => normalizeTopicCandidate(candidate))
+      .find((candidate): candidate is TopicCandidate => candidate !== null);
+    if (existingCandidate && !reservations.some((reservation) =>
+      this.reservationMatchesCandidate(reservation, existingCandidate)
+      && this.isReservedForAnotherProject(reservation, projectId, nextDate))) {
+      const reservation = await this.reservePhilippineHistoryTopic(
+        projectId,
+        project,
+        nextDate,
+        "next",
+        generationIdempotencyKey,
+        existingCandidate,
+        reservations
+      );
+      if (reservation) this.addTopicReservation(reservations, reservation);
+      return reservation ? existingCandidate : undefined;
+    }
+
+    let remaining = this.excludeReservedPhilippineHistoryCandidates(
+      candidates.filter((candidate) => !this.sameTopicOrTitle(candidate, selected)),
+      reservations,
+      projectId,
+      nextDate
+    );
+    while (remaining.length) {
+      let nextCandidate: TopicCandidate;
+      try {
+        nextCandidate = await this.chooseCandidate(project, remaining, history);
+      } catch (error) {
+        if (error instanceof AppError && error.code === "NO_UNIQUE_TOPICS") return undefined;
+        throw error;
+      }
+      const reservation = await this.reservePhilippineHistoryTopic(
+        projectId,
+        project,
+        nextDate,
+        "next",
+        generationIdempotencyKey,
+        nextCandidate,
+        reservations
+      );
+      if (reservation) {
+        this.addTopicReservation(reservations, reservation);
+        await this.repository.saveResearchCheckpoint?.(projectId, nextDate, [nextCandidate]);
+        return nextCandidate;
+      }
+      remaining = remaining.filter((candidate) => !this.sameTopicOrTitle(candidate, nextCandidate));
+    }
+    return undefined;
   }
 
   private async ownedProject(userId: string, projectId: string) {
