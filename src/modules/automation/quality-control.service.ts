@@ -1,11 +1,12 @@
 import type { ContentHistoryDocument } from "../models/content-history.model";
+import { ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID } from "./serialized-story";
 export interface QcInput { content: ContentHistoryDocument; finalVideo?: { durationSeconds?: number; width?: number; height?: number; hasAudio?: boolean; blankSceneCount?: number; subtitleCount?: number; unauthorizedWatermark?: boolean; mediaRightsVerified?: boolean }; accountActive: boolean; }
 export class QualityControlService {
   public check(input: QcInput) {
     const critical: string[] = []; const warnings: string[] = [];
     const c = input.content, v = input.finalVideo;
     if (!input.accountActive) warnings.push("assigned account credentials are inactive");
-    if (!c.sourceLinks.length || c.sourceLinks.some((url) => !/^https?:\/\//.test(url))) warnings.push("important facts do not have valid source URLs");
+    if (c.nicheId !== ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID && (!c.sourceLinks.length || c.sourceLinks.some((url) => !/^https?:\/\//.test(url)))) warnings.push("important facts do not have valid source URLs");
     if (!c.script?.trim()) warnings.push("narration script is missing");
     if (!c.voiceId) warnings.push("voice selection is missing");
     if (!v) warnings.push("final video is missing");

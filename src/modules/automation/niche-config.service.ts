@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { AppError } from "../../common/errors/app-error";
-import { STORY_FORMATS, type NicheProfile, type VoiceProfile } from "./automation.types";
+import { FOCUSED_NICHE_IDS, STORY_FORMATS, type NicheProfile, type VoiceProfile } from "./automation.types";
 import { NicheProfileModel, toNicheProfile, type PersistentNicheProfile } from "../models/niche-profile.model";
 
 const voicePreferenceSchema = z.object({
@@ -11,7 +11,7 @@ const voicePreferenceSchema = z.object({
   traits: z.array(z.string().min(1)).min(1), accent: z.string().optional()
 });
 const nicheSchema = z.object({
-  id: z.string().regex(/^[a-z0-9_]+$/), name: z.string().min(1), tones: z.array(z.string()).min(1),
+  id: z.string().regex(/^[a-z0-9_]+$/), name: z.string().min(1), description: z.string().min(1).optional(), isFictional: z.boolean().optional(), tones: z.array(z.string()).min(1),
   targetAudience: z.array(z.string()).min(1), preferredVoice: voicePreferenceSchema, visualStyle: z.string().min(1),
   contentRestrictions: z.array(z.string()), preferredTopicCategories: z.array(z.string()).min(1),
   preferredStoryFormats: z.array(z.enum(STORY_FORMATS)).min(1), hashtagCategories: z.array(z.string()).min(1),
@@ -45,8 +45,9 @@ export class NicheConfigService {
     return this.nicheRegistry.niches.map((niche) => ({
       ...niche,
       slug: niche.id.replaceAll("_", "-"),
-      description: niche.name + " stories tailored for short-form factual storytelling.",
+      description: niche.description ?? niche.name + " stories tailored for short-form factual storytelling.",
       active: true,
+      isFictional: niche.isFictional ?? false,
       defaultTone: niche.tones[0],
       allowedStoryFormats: niche.preferredStoryFormats,
       preferredVoiceCharacteristics: niche.preferredVoice,
@@ -59,20 +60,28 @@ export class NicheConfigService {
       voicePreferences: niche.preferredVoice
     })) as NicheProfile[];
   }
+  public listFocusedNiches(): NicheProfile[] {
+    return this.listNiches().filter((profile) => (FOCUSED_NICHE_IDS as readonly string[]).includes(profile.id));
+  }
+  public isFocusedNiche(profileId?: string): boolean {
+    return Boolean(profileId && (FOCUSED_NICHE_IDS as readonly string[]).includes(profileId));
+  }
   public async seedDefaults() {
-    const profiles = this.listNiches();
+    const profiles = this.listFocusedNiches();
     await NicheProfileModel.bulkWrite(profiles.map((profile) => ({
       updateOne: { filter: { profileId: profile.id }, update: { $setOnInsert: this.persistentPayload(profile) }, upsert: true }
     })));
     return { seeded: profiles.length, total: await NicheProfileModel.countDocuments() };
   }
   public async ensureSeeded() {
-    if (await NicheProfileModel.countDocuments() === 0) await this.seedDefaults();
+    const requiredProfileIds = [...FOCUSED_NICHE_IDS];
+    const seededCount = await NicheProfileModel.countDocuments({ profileId: { $in: requiredProfileIds } });
+    if (seededCount < requiredProfileIds.length) await this.seedDefaults();
   }
   public async listActiveNiches() {
-    if (NicheProfileModel.db.readyState === 0) return this.listNiches().filter((profile) => profile.active);
+    if (NicheProfileModel.db.readyState === 0) return this.listFocusedNiches().filter((profile) => profile.active).sort((left, right) => left.name.localeCompare(right.name));
     await this.ensureSeeded();
-    return (await NicheProfileModel.find({ active: true }).sort({ name: 1 }).exec()).map(toNicheProfile);
+    return (await NicheProfileModel.find({ active: true, profileId: { $in: [...FOCUSED_NICHE_IDS] } }).sort({ name: 1 }).exec()).map(toNicheProfile);
   }
   public async getPersistentNicheOrThrow(profileId: string) {
     if (NicheProfileModel.db.readyState === 0) return this.getNicheOrThrow(profileId);
@@ -108,6 +117,7 @@ export class NicheConfigService {
   private persistentPayload(profile: NicheProfile): PersistentNicheProfile {
     return {
       profileId: profile.id, name: profile.name, slug: profile.slug, description: profile.description, active: profile.active,
+      isFictional: profile.isFictional ?? false,
       defaultLanguage: profile.defaultLanguage, tone: profile.tones, targetAudience: profile.targetAudience,
       topicCategories: profile.topicCategories, allowedNarrativeFormats: profile.allowedStoryFormats,
       voicePreferences: profile.voicePreferences, visualPreferences: profile.visualPreferences,

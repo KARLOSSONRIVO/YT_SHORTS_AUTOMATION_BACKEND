@@ -3,6 +3,7 @@ import { STORY_FORMATS, type NicheProfile, type StoryFormat, type VoicePreferenc
 
 export interface PersistentNicheProfile {
   profileId: string; name: string; slug: string; description: string; active: boolean;
+  isFictional?: boolean;
   defaultLanguage: string; tone: string[]; targetAudience: string[]; topicCategories: string[];
   allowedNarrativeFormats: StoryFormat[]; voicePreferences: VoicePreference; visualPreferences: string[];
   researchRequirements: string[]; contentRestrictions: string[]; hashtagStrategy: string[]; targetRegion: string;
@@ -21,6 +22,7 @@ const nicheProfileSchema = new Schema<PersistentNicheProfile>({
   slug: { type: String, required: true, unique: true, index: true, trim: true },
   description: { type: String, required: true, trim: true },
   active: { type: Boolean, required: true, default: true, index: true },
+  isFictional: { type: Boolean, default: false },
   defaultLanguage: { type: String, required: true, default: 'en' },
   tone: { type: [String], required: true }, targetAudience: { type: [String], required: true },
   topicCategories: { type: [String], required: true },
@@ -35,7 +37,7 @@ export type NicheProfileDocument = HydratedDocument<PersistentNicheProfile>;
 
 export const toNicheProfile = (document: NicheProfileDocument): NicheProfile => ({
   id: document.profileId, name: document.name, slug: document.slug, description: document.description,
-  active: document.active, tones: document.tone, defaultTone: document.tone[0], targetAudience: document.targetAudience,
+  active: document.active, isFictional: document.isFictional ?? false, tones: document.tone, defaultTone: document.tone[0], targetAudience: document.targetAudience,
   preferredVoice: document.voicePreferences, preferredVoiceCharacteristics: document.voicePreferences,
   voicePreferences: document.voicePreferences, visualStyle: document.visualPreferences.join(', '),
   visualPreferences: document.visualPreferences, contentRestrictions: document.contentRestrictions,

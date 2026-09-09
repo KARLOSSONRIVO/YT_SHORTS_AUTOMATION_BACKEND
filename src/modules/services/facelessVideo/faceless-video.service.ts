@@ -11,7 +11,7 @@ import { JobService } from "../job/job.service";
 import { ProjectService } from "../project/project.service";
 import { QueueService } from "../queue/queue.service";
 import { isRateLimitFailure } from "../../automation/retry-policy";
-import type { ContentType } from "../../automation/automation.types";
+import type { ContentType, ScriptFramework, SerializedStoryAssignment } from "../../automation/automation.types";
 
 export type FacelessStage = "script" | "audio" | "subtitles" | "scenes" | "animations" | "ambience" | "render";
 
@@ -24,7 +24,7 @@ export interface CreateFacelessProjectInput {
   platforms?: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
-  scriptFramework?: "psychology_truth" | "history_story" | "reddit_story";
+  scriptFramework?: ScriptFramework;
   facelessRenderMode?: "image_story" | "animation_story" | "background_video";
   voice?: string;
   tone?: string;
@@ -39,6 +39,7 @@ export interface CreateFacelessProjectInput {
   experimentVariant?: string;
   nextStoryTitle?: string;
   nextStoryTopic?: string;
+  serializedStoryAssignment?: SerializedStoryAssignment;
 }
 
 interface StoryStagePayload {
@@ -222,10 +223,11 @@ export class FacelessVideoService {
       nicheId: project.nicheId,
       experimentVariant: project.experimentVariant,
       nextStoryTitle: project.nextStoryTitle,
-      nextStoryTopic: project.nextStoryTopic
+      nextStoryTopic: project.nextStoryTopic,
+      serializedStory: project.serializedStoryAssignment
     });
 
-    const scriptTitle = project.contentType === "REDDIT_STORY" ? project.title : response.title;
+    const scriptTitle = project.contentType === "REDDIT_STORY" || this.effectiveScriptFramework(project) === "serialized_story" ? project.title : response.title;
     const script = await this.facelessVideoRepository.upsertScript(payload.projectId, {
       title: scriptTitle,
       hook: response.hook,
@@ -571,6 +573,9 @@ export class FacelessVideoService {
     ]);
 
     await this.projectService.updateWorkflow(payload.projectId, "completed", "completed");
+    if (project.parentProjectId && project.serializedStoryAssignment) {
+      await this.projectService.advanceSerializedStory(String(project.parentProjectId), project.serializedStoryAssignment);
+    }
     await this.markJobCompleted(payload.jobId, {
       renderId: render.id,
       assetIds: assets.map((asset) => asset.id)
@@ -650,7 +655,7 @@ export class FacelessVideoService {
 
   private effectiveScriptFramework(
     project: Pick<ProjectDocument, "facelessSource" | "scriptFramework" | "contentType">
-  ): "psychology_truth" | "history_story" | "reddit_story" {
+  ): ScriptFramework {
     if (project.contentType === "REDDIT_STORY") return "reddit_story";
     return project.scriptFramework ?? "psychology_truth";
   }

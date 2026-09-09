@@ -20,10 +20,11 @@ import { VoiceSelector } from "./voice-selector";
 import { MediaInspectionService } from "./media-inspection.service";
 import { isQueuedWorkflowFailure, isRateLimitFailure, isTemporaryFailure, retryDelayMs } from "./retry-policy";
 import type { AutomationRunCoordinator } from "./automation-run-coordinator";
-import type { AutomationMode, PhilippineHistoryVariant, StoryFormat, TopicCandidate } from "./automation.types";
+import type { AutomationMode, PhilippineHistoryVariant, SerializedStoryState, StoryFormat, TopicCandidate } from "./automation.types";
 import type { ContentType, VisualType } from "./automation.types";
 import type { RedditService } from "../services/reddit/reddit.service";
 import type { ClipQueueService } from "../services/clipQueue/clip-queue.service";
+import { applyQueuedSerializedEpisode, buildSerializedStoryAssignment, cloneSerializedStoryState, createSerializedStoryState, isOriginalSerializedMystery, serializedStoryStarted } from "./serialized-story";
 
 export interface CreateAutomationProjectInput {
   name: string;
@@ -35,6 +36,7 @@ export interface CreateAutomationProjectInput {
   uploadTime: string;
   visualType: VisualType;
   allowedNarrativeFormats?: StoryFormat[];
+  episodesPerSeries?: number;
   redditConfig?: {
     sourceMode: "ONE_SUBREDDIT" | "MULTIPLE_SUBREDDITS" | "AUTO"; subreddits: string[];
     sortMethod: "NEW" | "HOT" | "TOP_TODAY" | "TOP_WEEK" | "RISING" | "BEST_ELIGIBLE";
@@ -81,6 +83,21 @@ const buildPhilippineHistorySourceText = (candidate: TopicCandidate) => [
   candidate.dates.length ? `Dates: ${candidate.dates.join(", ")}` : "",
   candidate.events.length ? `Events: ${candidate.events.join(", ")}` : "",
   candidate.sourceLinks.length ? `Authoritative sources: ${candidate.sourceLinks.join("\n")}` : ""
+].filter(Boolean).join("\n");
+
+const buildSerializedStorySourceText = (assignment: ReturnType<typeof buildSerializedStoryAssignment>, state: SerializedStoryState) => [
+  "This is an original fictional story. Do not present it as a real event.",
+  `Series: ${assignment.seriesTitle} (series ${assignment.seriesNumber})`,
+  `Episode: ${assignment.episodeNumber} of ${assignment.episodesPerSeries}`,
+  `Premise: ${assignment.premise}`,
+  `Setting: ${assignment.setting}`,
+  `Character notes: ${assignment.characterNotes}`,
+  `Episode objective: ${assignment.episodeObjective}`,
+  `Episode summary: ${assignment.episodeSummary}`,
+  state.lastEpisodeSummary ? `Previous episode summary: ${state.lastEpisodeSummary}` : "",
+  assignment.nextEpisodeTitle ? `Exact next episode title: ${assignment.nextEpisodeTitle}` : "",
+  assignment.nextEpisodeTopic ? `Exact next episode topic: ${assignment.nextEpisodeTopic}` : "",
+  assignment.nextEpisodePromise ? `Next episode promise: ${assignment.nextEpisodePromise}` : ""
 ].filter(Boolean).join("\n");
 
 const nextDailyDateKey = (scheduledDate: string): string => {
@@ -141,8 +158,13 @@ export class AutomationService {
   }
 
   public async createProject(userId: string, input: CreateAutomationProjectInput) {
+    const isSerializedStory = input.contentType === "FACELESS_NICHE" && isOriginalSerializedMystery(input.nicheId);
+    if (input.episodesPerSeries !== undefined && !isSerializedStory)
+      throw new AppError("Episodes per series is only available for Original Serialized Mystery Stories.", 422, "SERIALIZED_STORY_CONFIG_NOT_ALLOWED");
     if (input.contentType === "FACELESS_NICHE" && !input.nicheId)
       throw new AppError("Select an active niche profile.", 422, "NICHE_REQUIRED");
+    if (input.contentType === "FACELESS_NICHE" && !this.config.isFocusedNiche(input.nicheId))
+      throw new AppError("This niche is not available for new projects. Choose one of the four focused niches.", 422, "NICHE_NOT_FOCUSED");
     if (input.contentType === "FACELESS_NICHE") await this.config.getPersistentNicheOrThrow(input.nicheId!);
     if (input.contentType === "REDDIT_STORY" && (!this.reddit || !input.redditConfig))
       throw new AppError("Reddit configuration is required.", 422, "REDDIT_CONFIG_REQUIRED");
@@ -151,7 +173,8 @@ export class AutomationService {
     if (!account.authenticationActive) throw new AppError("Assigned account credentials are inactive or need refresh.", 409, "ACCOUNT_CREDENTIALS_INACTIVE", account);
     if (input.contentType === "FACELESS_NICHE") await this.enforceChannelNicheLock(userId, input.accountId, input.nicheId!);
     const nextRunAt = this.nextProjectRun(input.contentType, input.timezone, input.uploadTime);
-    const project = await this.projects.createAutomationProject({ ...input, userId, nextRunAt });
+    const project = await this.projects.createAutomationProject({ ...input, userId, nextRunAt,
+      episodesPerSeries: isSerializedStory ? input.episodesPerSeries : undefined });
     if (input.contentType === "REDDIT_STORY" && input.redditConfig) await this.reddit!.saveConfig(project.id, input.redditConfig);
     await this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "project_created", severity: "info",
       message: input.automationEnabled ? "Project created and daily automation scheduled." : "Project created with daily automation paused.",
@@ -163,6 +186,16 @@ export class AutomationService {
     const project = await this.ownedProject(userId, projectId);
     const contentType = input.contentType ?? project.contentType;
     const nicheId = input.nicheId ?? project.nicheId;
+    const isSerializedStory = contentType === "FACELESS_NICHE" && isOriginalSerializedMystery(nicheId);
+    if (input.nicheId !== undefined && input.nicheId !== project.nicheId && contentType === "FACELESS_NICHE" && !this.config.isFocusedNiche(input.nicheId))
+      throw new AppError("This niche is not available for new projects. Choose one of the four focused niches.", 422, "NICHE_NOT_FOCUSED");
+    if (project.serializedStory && !isSerializedStory && (input.nicheId !== undefined || input.contentType !== undefined))
+      throw new AppError("A serialized-story project cannot be switched to another content niche.", 409, "SERIALIZED_STORY_NICHE_LOCKED");
+    if (input.episodesPerSeries !== undefined && !isSerializedStory)
+      throw new AppError("Episodes per series is only available for Original Serialized Mystery Stories.", 422, "SERIALIZED_STORY_CONFIG_NOT_ALLOWED");
+    if (input.episodesPerSeries !== undefined && project.serializedStory && serializedStoryStarted(project.serializedStory)
+      && input.episodesPerSeries !== project.serializedStory.episodesPerSeries)
+      throw new AppError("Episodes per series cannot change after a serialized story has started.", 409, "SERIALIZED_STORY_CONFIG_LOCKED");
     if (contentType === "FACELESS_NICHE" && nicheId) await this.config.getPersistentNicheOrThrow(nicheId);
     const timezone = input.timezone ?? project.timezone!;
     const uploadTime = input.uploadTime ?? project.uploadTime!;
@@ -174,8 +207,13 @@ export class AutomationService {
     const effectiveAccountId = input.accountId ?? (project.accountId ? String(project.accountId) : undefined);
     if (contentType === "FACELESS_NICHE" && nicheId && effectiveAccountId) await this.enforceChannelNicheLock(userId, effectiveAccountId, nicheId);
     if (contentType === "REDDIT_STORY" && input.redditConfig && this.reddit) await this.reddit.saveConfig(projectId, input.redditConfig);
-    return this.projects.updateProject(projectId, { ...input, title: input.name, name: input.name, durationSeconds: 60, targetDurationSeconds: 60,
+    const { episodesPerSeries: _episodesPerSeries, ...projectInput } = input;
+    const serializedStory = isSerializedStory
+      ? { ...(project.serializedStory ?? createSerializedStoryState()), ...(input.episodesPerSeries === undefined ? {} : { episodesPerSeries: input.episodesPerSeries }) }
+      : undefined;
+    return this.projects.updateProject(projectId, { ...projectInput, title: input.name, name: input.name, durationSeconds: 60, targetDurationSeconds: 60,
       allowedStoryFormats: input.allowedNarrativeFormats,
+      ...(isSerializedStory ? { serializedStory } : {}),
       nextRunAt: (input.automationEnabled ?? project.automationEnabled) ? this.nextProjectRun(contentType, timezone, uploadTime) : project.nextRunAt,
       automationStatus: (input.automationEnabled ?? project.automationEnabled) ? "active" : "paused" });
   }
@@ -213,6 +251,10 @@ export class AutomationService {
     }
     this.assertAutomationProject(project);
     const isPhilippineHistory = project.contentType === "FACELESS_NICHE" && project.nicheId === PHILIPPINE_HISTORY_NICHE_ID;
+    const isSerializedStory = project.contentType === "FACELESS_NICHE" && isOriginalSerializedMystery(project.nicheId);
+    const serializedStoryState: SerializedStoryState | undefined = isSerializedStory
+      ? project.serializedStory ? cloneSerializedStoryState(project.serializedStory) : createSerializedStoryState()
+      : undefined;
     const date = scheduledDate ?? this.schedules.localDateKey(project.timezone!);
     const generationIdempotencyKey = projectDailyIdempotencyKey(projectId, date, project.contentType);
     const automationRunId = runId ?? generationIdempotencyKey;
@@ -268,7 +310,8 @@ export class AutomationService {
           ...topicReservations.flatMap((reservation) => [reservation.topic, reservation.title]),
           ...history.map((item) => item.topic)
         ])].slice(0, 50),
-        recentEntities: history.flatMap((item) => item.importantEntities) });
+        recentEntities: history.flatMap((item) => item.importantEntities),
+        serializedStoryState });
       candidates = isPhilippineHistory
         ? this.excludeReservedPhilippineHistoryCandidates(generated, topicReservations, projectId, date)
         : generated;
@@ -319,11 +362,21 @@ export class AutomationService {
         throw error;
       }
     }
+    if (isSerializedStory && (!serializedStoryState || !selected.serializedStory))
+      throw new AppError("The serialized story generator did not return a usable story bible.", 502, "SERIALIZED_STORY_PLAN_INVALID");
+    if (isSerializedStory && serializedStoryState) selected = applyQueuedSerializedEpisode(selected, serializedStoryState);
+    const serializedStoryAssignment = isSerializedStory && serializedStoryState && selected.serializedStory
+      ? buildSerializedStoryAssignment(selected.serializedStory, serializedStoryState)
+      : undefined;
     const storyFormat = this.formats.select(profile, selected, { mode: "auto_select", allowed: project.allowedStoryFormats });
     const voice = this.voices.select(profile, this.config.listVoices(), storyFormat, project.language!);
     const targetDurationSeconds = automationTargetDuration(project.contentType, project.nicheId, project.durationSeconds ?? 60);
     const experimentVariant = isPhilippineHistory ? philippineHistoryVariantForDate(date) : undefined;
-    const sourceText = isPhilippineHistory ? buildPhilippineHistorySourceText(selected) : undefined;
+    const sourceText = isPhilippineHistory
+      ? buildPhilippineHistorySourceText(selected)
+      : serializedStoryAssignment && serializedStoryState
+        ? buildSerializedStorySourceText(serializedStoryAssignment, serializedStoryState)
+        : undefined;
     let nextCandidate = isPhilippineHistory
       ? await this.reservePhilippineHistoryNextCandidate(projectId, project, date, candidates ?? [], selected, history, generationIdempotencyKey, topicReservations)
       : undefined;
@@ -362,6 +415,7 @@ export class AutomationService {
     const renderProject = await this.faceless.createGeneratedStoryProject({ parentProjectId: projectId, userId: String(project.userId), topic: selected.topic,
       title: selected.title, description: selected.summary, sourceText, nicheId: project.nicheId, experimentVariant,
       nextStoryTitle: nextCandidate?.title, nextStoryTopic: nextCandidate?.topic,
+      serializedStoryAssignment,
       platforms: ["youtube"], targetDurationSeconds,
       stylePreset: profile.visualStyle, scriptFramework: project.contentType === "REDDIT_STORY" ? "reddit_story" : this.formats.framework(storyFormat, project.nicheId),
       facelessRenderMode,
@@ -391,6 +445,16 @@ export class AutomationService {
           hookRule: "immediate_first_sentence",
           targetDurationSeconds,
           nextStory: nextCandidate ? { date: nextDailyDateKey(date), title: nextCandidate.title, topic: nextCandidate.topic } : undefined
+        } : serializedStoryAssignment ? {
+          series: serializedStoryAssignment.seriesTitle,
+          seriesNumber: serializedStoryAssignment.seriesNumber,
+          episodeNumber: serializedStoryAssignment.episodeNumber,
+          episodesPerSeries: serializedStoryAssignment.episodesPerSeries,
+          nextEpisode: serializedStoryAssignment.nextEpisodeTitle ? {
+            title: serializedStoryAssignment.nextEpisodeTitle,
+            topic: serializedStoryAssignment.nextEpisodeTopic,
+            promise: serializedStoryAssignment.nextEpisodePromise
+          } : undefined
         } : undefined } };
     const historyResult = typeof this.repository.createHistoryIdempotent === "function"
       ? await this.repository.createHistoryIdempotent(historyInput)

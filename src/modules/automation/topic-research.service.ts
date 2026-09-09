@@ -1,7 +1,8 @@
 import axios from "axios";
 import { AppError } from "../../common/errors/app-error";
 import { DuplicateDetector } from "./duplicate-detector";
-import type { NicheProfile, TopicCandidate } from "./automation.types";
+import type { NicheProfile, SerializedStoryCandidate, SerializedStoryState, TopicCandidate } from "./automation.types";
+import { ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID } from "./serialized-story";
 
 interface GroqCompletionResponse {
   choices?: Array<{ message?: { content?: string } }>;
@@ -17,6 +18,25 @@ const normalizeText = (value: unknown): string => typeof value === "string" ? va
 
 const normalizeStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean) : [];
+
+const normalizeSerializedStory = (value: unknown): SerializedStoryCandidate | undefined => {
+  if (!isRecord(value)) return undefined;
+  const required = ["seriesTitle", "premise", "setting", "characterNotes", "episodeObjective", "episodeSummary"]
+    .map((key) => normalizeText(value[key]));
+  if (required.some((item) => !item)) return undefined;
+  const [seriesTitle, premise, setting, characterNotes, episodeObjective, episodeSummary] = required;
+  return {
+    seriesTitle,
+    premise,
+    setting,
+    characterNotes,
+    episodeObjective,
+    episodeSummary,
+    nextEpisodeTitle: normalizeText(value.nextEpisodeTitle) || undefined,
+    nextEpisodeTopic: normalizeText(value.nextEpisodeTopic) || undefined,
+    nextEpisodePromise: normalizeText(value.nextEpisodePromise) || undefined
+  };
+};
 
 const normalizeNumberArray = (value: unknown): number[] | undefined => {
   if (!Array.isArray(value)) return undefined;
@@ -96,7 +116,8 @@ export const normalizeTopicCandidate = (value: unknown): TopicCandidate | null =
     sourceLinks: normalizeSourceLinks(value.sourceLinks),
     disputedFacts: normalizeStringArray(value.disputedFacts),
     factualConfidence: normalizeBoundedNumber(value.factualConfidence, 0),
-    scores: normalizeScores(scoreSource)
+    scores: normalizeScores(scoreSource),
+    serializedStory: normalizeSerializedStory(value.serializedStory)
   };
 };
 
@@ -110,14 +131,18 @@ export class TopicResearchService {
     private readonly fallbackModels: string[] = []
   ) {}
 
-  public async generate(input: { profile: NicheProfile; language: string; region: string; recentTopics: string[]; recentEntities: string[]; count?: number }): Promise<TopicCandidate[]> {
+  public async generate(input: { profile: NicheProfile; language: string; region: string; recentTopics: string[]; recentEntities: string[]; count?: number; serializedStoryState?: SerializedStoryState }): Promise<TopicCandidate[]> {
     if (!this.apiKey) throw new AppError("GROQ_API_KEY is required for automated topic research.", 503, "GROQ_NOT_CONFIGURED");
     const url = `${this.baseUrl.replace(/\/+$/, "")}/chat/completions`;
     const models = [...new Set([this.model, ...this.fallbackModels].map((model) => model.trim()).filter(Boolean))];
     for (const [index, model] of models.entries()) {
       try {
         const response = await this.post(url, this.buildRequest(model, input));
-        const candidates = this.parseCandidates(response.data).map((candidate) => input.profile.id === PSYCHOLOGY_NICHE_ID
+        const isSerializedStory = input.profile.id === ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID;
+        const requiresNextEpisode = isSerializedStory && input.serializedStoryState
+          ? input.serializedStoryState.nextEpisodeNumber < input.serializedStoryState.episodesPerSeries
+          : false;
+        const candidates = this.parseCandidates(response.data, { fictional: isSerializedStory, requiresNextEpisode }).map((candidate) => input.profile.id === PSYCHOLOGY_NICHE_ID
           ? { ...candidate, title: normalizePsychologyTitle(candidate) }
           : candidate);
         return candidates.map((candidate) => ({
@@ -133,8 +158,8 @@ export class TopicResearchService {
     throw new AppError("No Groq topic-research model is configured.", 503, "GROQ_NOT_CONFIGURED");
   }
 
-  private buildRequest(model: string, input: { profile: NicheProfile; language: string; region: string; recentTopics: string[]; recentEntities: string[]; count?: number }) {
-    const usesCompound = model.startsWith("groq/compound");
+  private buildRequest(model: string, input: { profile: NicheProfile; language: string; region: string; recentTopics: string[]; recentEntities: string[]; count?: number; serializedStoryState?: SerializedStoryState }) {
+    const usesCompound = model.startsWith("groq/compound") && input.profile.id !== ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID;
     const request: Record<string, unknown> = {
       model,
       messages: [{ role: "user", content: this.buildPrompt(input, usesCompound) }],
@@ -193,19 +218,24 @@ export class TopicResearchService {
       throw new AppError(providerMessage ?? "Groq request failed.", status, "GROQ_REQUEST_FAILED", details);
     }
   }
-  private buildPrompt(input: { profile: NicheProfile; language: string; region: string; recentTopics: string[]; recentEntities: string[]; count?: number }, hasLiveWebSearch = true) {
+  private buildPrompt(input: { profile: NicheProfile; language: string; region: string; recentTopics: string[]; recentEntities: string[]; count?: number; serializedStoryState?: SerializedStoryState }, hasLiveWebSearch = true) {
     const sourceInstruction = hasLiveWebSearch
       ? "Use web search to verify current facts."
       : "Live web search is unavailable. Use only high-confidence established facts, do not claim live verification, and do not invent details or source links.";
-    const nicheStrategy = input.profile.id === "philippine_history"
+    const nicheStrategy = input.profile.id === ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID
+      ? `Original serialized-story strategy: create entirely fictional psychological mystery/suspense episodes, never claim that people, places, or events are real, and do not use web research or source links. Keep the current series bible consistent. The current series state is ${JSON.stringify(input.serializedStoryState ?? null)}. If queuedEpisodeTitle and queuedEpisodeTopic are present, use them exactly as the current episode's title and topic. For a non-final episode, create a concrete next episode title, topic, and promise; for a final episode, leave all next-episode fields empty.`
+      : input.profile.id === "philippine_history"
       ? "Philippine-history strategy: every candidate must be explainable in 40 to 55 seconds and must be packaged around a recognizable object, place, artifact, event, or consequence. Prefer a clear mystery, unusual fact, conflict, or historical consequence that can be understood immediately. Do not lead with an unfamiliar person's name unless the title also states the event or impact that makes the person matter. Avoid broad textbook titles such as 'The History of...' and generic 'Unraveling...' wording. Titles must promise a concrete reveal, not just a biography."
       : input.profile.id === PSYCHOLOGY_NICHE_ID
         ? "Psychology strategy: every candidate must be built around a recognizable everyday behavior, relationship moment, emotion, decision, or body-language cue with a direct consequence viewers can feel personally. Use conversational Why/How titles that make the consequence clear immediately. Do not lead with academic concept names such as 'Understanding...', 'The Impact of...', 'The Psychology of...', or '[Effect/Bias/Hormone] in Decision Making'; name the psychology concept after the hook instead. Avoid creator-facing topics and abstract textbook framing. Keep the idea explainable in roughly 35 to 50 seconds, use one concrete example, and never diagnose viewers."
         : "";
+    if (input.profile.id === ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID) {
+      return `Create ${input.count ?? 3} original fictional serialized mystery episode concepts for ${input.profile.name}. ${nicheStrategy} Return only JSON with a candidates array. Each candidate must contain topic, title, summary, storyAngle, importantEntities, dates, events, keywords, sourceLinks (empty array), disputedFacts (empty array), factualConfidence (0), scores for curiosity, emotionalImpact, shortFormPotential, nicheRelevance, originality, retentionPotential, and serializedStory with seriesTitle, premise, setting, characterNotes, episodeObjective, episodeSummary, and optional nextEpisodeTitle, nextEpisodeTopic, nextEpisodePromise. Make the opening visual obvious, the emotional stake concrete, and the ending strong enough to support a spoken Short. Language=${input.language}; region=${input.region}; categories=${JSON.stringify(input.profile.preferredTopicCategories)}; restrictions=${JSON.stringify(input.profile.contentRestrictions)}; avoid=${JSON.stringify(input.recentTopics.slice(0,50))}. Never include real-person accusations, real-event claims, citations, or URLs.`;
+    }
     return `Research ${input.count ?? 3} factual short-video topics for ${input.profile.name}. ${sourceInstruction} ${nicheStrategy} Return only JSON with a candidates array containing topic, title, summary, storyAngle, importantEntities, dates, events, keywords, sourceLinks, disputedFacts, factualConfidence, and scores for curiosity, emotionalImpact, shortFormPotential, nicheRelevance, originality, retentionPotential. Language=${input.language}; region=${input.region}; categories=${JSON.stringify(input.profile.preferredTopicCategories)}; restrictions=${JSON.stringify(input.profile.contentRestrictions)}; avoid=${JSON.stringify(input.recentTopics.slice(0,50))}; rotate entities=${JSON.stringify(input.recentEntities.slice(0,50))}. Each candidate needs two authoritative direct HTTPS URLs. Prefer primary sources. Reject unsupported claims; never invent details or source links.`;
   }
 
-  private parseCandidates(value: GroqCompletionResponse): TopicCandidate[] {
+  private parseCandidates(value: GroqCompletionResponse, options: { fictional?: boolean; requiresNextEpisode?: boolean } = {}): TopicCandidate[] {
     const content = value.choices?.[0]?.message?.content?.trim() ?? "";
     if (!content) throw new AppError("Groq returned no topic research content.", 502, "RESEARCH_RESPONSE_INVALID");
     const objectStart = content.indexOf("{");
@@ -225,7 +255,10 @@ export class TopicResearchService {
     const candidates = returnedCandidates
       .map((candidate) => normalizeTopicCandidate(candidate))
       .filter((candidate): candidate is TopicCandidate => candidate !== null)
-      .filter((candidate) => candidate.topic && candidate.title && candidate.sourceLinks.length >= 2 && candidate.factualConfidence >= 0.6);
+      .filter((candidate) => candidate.topic && candidate.title && (options.fictional
+        ? Boolean(candidate.serializedStory)
+          && (!options.requiresNextEpisode || Boolean(candidate.serializedStory?.nextEpisodeTitle && candidate.serializedStory.nextEpisodeTopic && candidate.serializedStory.nextEpisodePromise))
+        : candidate.sourceLinks.length >= 2 && candidate.factualConfidence >= 0.6));
     if (candidates.length < 3) throw new AppError("Research produced fewer than three adequately sourced candidates.", 422, "INSUFFICIENT_RESEARCH_CANDIDATES");
     return candidates;
   }

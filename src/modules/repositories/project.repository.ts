@@ -1,5 +1,7 @@
 import type { FilterQuery, UpdateQuery } from "mongoose";
 import { ProjectModel, type Project, type ProjectDocument } from "../models/project.model";
+import type { SerializedStoryAssignment } from "../automation/automation.types";
+import { buildNextSerializedStoryState, ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID } from "../automation/serialized-story";
 
 export class ProjectRepository {
   public create(payload: Partial<Project>): Promise<ProjectDocument> {
@@ -38,6 +40,28 @@ export class ProjectRepository {
 
   public updateById(projectId: string, update: UpdateQuery<Project>): Promise<ProjectDocument | null> {
     return ProjectModel.findByIdAndUpdate(projectId, update, { new: true }).exec();
+  }
+
+  public advanceSerializedStory(parentProjectId: string, assignment: SerializedStoryAssignment): Promise<ProjectDocument | null> {
+    const nextState = buildNextSerializedStoryState(assignment);
+    const isFinalEpisode = assignment.episodeNumber >= assignment.episodesPerSeries;
+    const update: UpdateQuery<Project> = isFinalEpisode
+      ? {
+        $set: { "serializedStory.episodesPerSeries": nextState.episodesPerSeries, "serializedStory.nextSeriesNumber": nextState.nextSeriesNumber, "serializedStory.nextEpisodeNumber": nextState.nextEpisodeNumber },
+        $unset: { "serializedStory.seriesTitle": 1, "serializedStory.premise": 1, "serializedStory.setting": 1, "serializedStory.characterNotes": 1, "serializedStory.lastEpisodeSummary": 1, "serializedStory.queuedEpisodeTitle": 1, "serializedStory.queuedEpisodeTopic": 1, "serializedStory.queuedEpisodePromise": 1 }
+      }
+      : { $set: { serializedStory: nextState } };
+
+    return ProjectModel.findOneAndUpdate(
+      {
+        _id: parentProjectId,
+        nicheId: ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID,
+        "serializedStory.nextSeriesNumber": assignment.seriesNumber,
+        "serializedStory.nextEpisodeNumber": assignment.episodeNumber
+      },
+      update,
+      { new: true }
+    ).exec();
   }
 
   public deleteById(projectId: string): Promise<ProjectDocument | null> {

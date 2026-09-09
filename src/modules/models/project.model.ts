@@ -1,5 +1,5 @@
 import { HydratedDocument, Schema, Types, model } from "mongoose";
-import { AUTOMATION_MODES, CONTENT_TYPES, STORY_FORMATS, VISUAL_TYPES, type AutomationMode, type ContentType, type StoryFormat, type VisualType } from "../automation/automation.types";
+import { AUTOMATION_MODES, CONTENT_TYPES, SCRIPT_FRAMEWORKS, STORY_FORMATS, VISUAL_TYPES, type AutomationMode, type ContentType, type ScriptFramework, type SerializedStoryAssignment, type SerializedStoryState, type StoryFormat, type VisualType } from "../automation/automation.types";
 
 export interface ProjectSubtitlePreferences {
   fontFamily: string;
@@ -62,7 +62,9 @@ export interface Project {
   platforms: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
-  scriptFramework?: "psychology_truth" | "history_story" | "reddit_story";
+  scriptFramework?: ScriptFramework;
+  serializedStory?: SerializedStoryState;
+  serializedStoryAssignment?: SerializedStoryAssignment;
   facelessRenderMode?: "image_story" | "animation_story" | "background_video";
   voice?: string;
   tone?: string;
@@ -122,6 +124,41 @@ const subtitlePreferencesSchema = new Schema<ProjectSubtitlePreferences>(
   { _id: false }
 );
 
+const serializedStoryStateSchema = new Schema<SerializedStoryState>(
+  {
+    episodesPerSeries: { type: Number, required: true, min: 1, max: 12 },
+    nextSeriesNumber: { type: Number, required: true, min: 1, default: 1 },
+    nextEpisodeNumber: { type: Number, required: true, min: 1, default: 1 },
+    seriesTitle: { type: String, trim: true },
+    premise: { type: String, trim: true },
+    setting: { type: String, trim: true },
+    characterNotes: { type: String, trim: true },
+    lastEpisodeSummary: { type: String, trim: true },
+    queuedEpisodeTitle: { type: String, trim: true },
+    queuedEpisodeTopic: { type: String, trim: true },
+    queuedEpisodePromise: { type: String, trim: true }
+  },
+  { _id: false }
+);
+
+const serializedStoryAssignmentSchema = new Schema<SerializedStoryAssignment>(
+  {
+    seriesNumber: { type: Number, required: true, min: 1 },
+    episodeNumber: { type: Number, required: true, min: 1 },
+    episodesPerSeries: { type: Number, required: true, min: 1, max: 12 },
+    seriesTitle: { type: String, required: true, trim: true },
+    premise: { type: String, required: true, trim: true },
+    setting: { type: String, required: true, trim: true },
+    characterNotes: { type: String, required: true, trim: true },
+    episodeObjective: { type: String, required: true, trim: true },
+    episodeSummary: { type: String, required: true, trim: true },
+    nextEpisodeTitle: { type: String, trim: true },
+    nextEpisodeTopic: { type: String, trim: true },
+    nextEpisodePromise: { type: String, trim: true }
+  },
+  { _id: false }
+);
+
 const projectSchema = new Schema<Project>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
@@ -176,9 +213,11 @@ const projectSchema = new Schema<Project>(
     stylePreset: { type: String, trim: true },
     scriptFramework: {
       type: String,
-      enum: ["psychology_truth", "history_story", "reddit_story"],
+      enum: SCRIPT_FRAMEWORKS,
       default: "psychology_truth"
     },
+    serializedStory: { type: serializedStoryStateSchema },
+    serializedStoryAssignment: { type: serializedStoryAssignmentSchema },
     facelessRenderMode: {
       type: String,
       enum: ["image_story", "animation_story", "background_video"],

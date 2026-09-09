@@ -1,7 +1,8 @@
 import { NotFoundError } from "../../../common/errors/not-found-error";
 import { ProjectRepository } from "../../repositories/project.repository";
 import { DEFAULT_PROJECT_SUBTITLE_PREFERENCES, type ProjectSubtitlePreferences } from "../../models/project.model";
-import type { AutomationMode, ContentType, StoryFormat, VisualType } from "../../automation/automation.types";
+import type { AutomationMode, ContentType, ScriptFramework, SerializedStoryAssignment, StoryFormat, VisualType } from "../../automation/automation.types";
+import { createSerializedStoryState, isOriginalSerializedMystery } from "../../automation/serialized-story";
 
 export interface CreateProjectInput {
   userId: string;
@@ -21,7 +22,7 @@ export interface CreateFacelessStoryProjectInput {
   platforms?: Array<"youtube" | "tiktok">;
   targetDurationSeconds?: number;
   stylePreset?: string;
-  scriptFramework?: "psychology_truth" | "history_story" | "reddit_story";
+  scriptFramework?: ScriptFramework;
   facelessRenderMode?: "image_story" | "animation_story" | "background_video";
   voice?: string;
   tone?: string;
@@ -36,6 +37,7 @@ export interface CreateFacelessStoryProjectInput {
   experimentVariant?: string;
   nextStoryTitle?: string;
   nextStoryTopic?: string;
+  serializedStoryAssignment?: SerializedStoryAssignment;
   subtitlePreferences?: Partial<ProjectSubtitlePreferences>;
 }
 
@@ -53,6 +55,7 @@ export interface CreateAutomationProjectInput {
   automationMode: AutomationMode;
   automationEnabled: boolean;
   nextRunAt?: Date;
+  episodesPerSeries?: number;
 }
 
 export class ProjectService {
@@ -99,6 +102,7 @@ export class ProjectService {
       automationEnabled: input.automationEnabled,
       automationStatus: input.automationEnabled ? "active" : "paused",
       nextRunAt: input.automationEnabled ? input.nextRunAt : undefined,
+      serializedStory: input.contentType === "FACELESS_NICHE" && isOriginalSerializedMystery(input.nicheId) ? createSerializedStoryState(input.episodesPerSeries) : undefined,
       platforms: ["youtube"],
       subtitlePreferences: { ...DEFAULT_PROJECT_SUBTITLE_PREFERENCES },
       status: "draft",
@@ -134,6 +138,7 @@ export class ProjectService {
       speakingRate: input.speakingRate,
       fallbackVoice: input.fallbackVoice,
       experimentVariant: input.experimentVariant,
+      serializedStoryAssignment: input.serializedStoryAssignment,
       subtitlePreferences: {
         ...DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
         ...input.subtitlePreferences
@@ -172,6 +177,10 @@ export class ProjectService {
 
   public updateProject(projectId: string, payload: Record<string, unknown>) {
     return this.projectRepository.updateById(projectId, payload as never);
+  }
+
+  public advanceSerializedStory(parentProjectId: string, assignment: SerializedStoryAssignment) {
+    return this.projectRepository.advanceSerializedStory(parentProjectId, assignment);
   }
 
   public findDueProjects(now: Date, limit = 25) { return this.projectRepository.findDue(now, limit); }

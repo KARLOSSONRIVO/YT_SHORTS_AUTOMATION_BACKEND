@@ -82,6 +82,22 @@
       "region": "GLOBAL"
     },
     {
+      "id": "original_serialized_mystery",
+      "name": "Original Serialized Mystery Stories",
+      "description": "Original fictional psychological mystery stories told in connected short episodes.",
+      "isFictional": true,
+      "tones": ["suspenseful", "emotional", "cinematic", "unsettling"],
+      "targetAudience": ["mystery fans", "story lovers", "young adults", "Shorts viewers"],
+      "preferredVoice": { "energy": 0.62, "speed": 0.98, "intensity": 0.82, "traits": ["cinematic", "suspenseful", "clear"] },
+      "visualStyle": "cinematic psychological mystery, moody practical lighting, expressive close-ups, rain-soaked environments, visual continuity across episodes",
+      "contentRestrictions": ["Clearly fictional; never present the story as a real event", "Do not use real private people, real accusations, or graphic gore", "Keep characters, settings, clues, and consequences consistent within a series"],
+      "preferredTopicCategories": ["missing-person mysteries", "impossible rooms", "secret identities", "unreliable memories", "psychological twists"],
+      "preferredStoryFormats": ["mystery_reveal", "unexpected_ending", "unsolved_mystery", "one_decision_changed_everything", "tragedy"],
+      "hashtagCategories": ["originalstories", "mysteryshorts", "storyseries", "psychologicalthriller", "fictionshorts"],
+      "language": "en",
+      "region": "GLOBAL"
+    },
+    {
       "id": "science",
       "name": "Science",
       "tones": ["curious", "clear", "awe-inspiring"],

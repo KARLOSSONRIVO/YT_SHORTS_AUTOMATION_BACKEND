@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHttpClient } from "../http/http.client";
+import type { ScriptFramework, SerializedStoryAssignment } from "../../modules/automation/automation.types";
 
 export interface PythonTranscriptionRequest {
   jobId: string;
@@ -368,10 +369,11 @@ export class PythonWorkerClient {
     experimentVariant?: string;
     nextStoryTitle?: string;
     nextStoryTopic?: string;
-    scriptFramework?: "psychology_truth" | "history_story" | "reddit_story";
+    scriptFramework?: ScriptFramework;
     sourceText?: string;
     storyFormat?: string;
     speakingRate?: number;
+    serializedStory?: SerializedStoryAssignment;
   }): Promise<PythonFacelessScriptResponse> {
     const response = await this.client.post<PythonFacelessScriptResponse>("/internal/faceless/generate-script", {
       job_id: input.jobId,
@@ -389,8 +391,22 @@ export class PythonWorkerClient {
       next_story_topic: input.nextStoryTopic,
       script_framework: input.scriptFramework,
       source_text: input.sourceText,
-      story_format: input.storyFormat
-      ,speaking_rate: input.speakingRate
+      story_format: input.storyFormat,
+      speaking_rate: input.speakingRate,
+      serialized_story: input.serializedStory ? {
+        series_number: input.serializedStory.seriesNumber,
+        episode_number: input.serializedStory.episodeNumber,
+        episodes_per_series: input.serializedStory.episodesPerSeries,
+        series_title: input.serializedStory.seriesTitle,
+        premise: input.serializedStory.premise,
+        setting: input.serializedStory.setting,
+        character_notes: input.serializedStory.characterNotes,
+        episode_objective: input.serializedStory.episodeObjective,
+        episode_summary: input.serializedStory.episodeSummary,
+        next_episode_title: input.serializedStory.nextEpisodeTitle,
+        next_episode_topic: input.serializedStory.nextEpisodeTopic,
+        next_episode_promise: input.serializedStory.nextEpisodePromise
+      } : undefined
     });
 
     return response.data;

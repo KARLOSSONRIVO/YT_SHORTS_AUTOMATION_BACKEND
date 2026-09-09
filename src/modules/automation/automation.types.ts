@@ -4,6 +4,16 @@ export type AutomationMode = (typeof AUTOMATION_MODES)[number];
 export const CONTENT_TYPES = ['FACELESS_NICHE', 'REDDIT_STORY', 'CLIP_UPLOAD'] as const;
 export type ContentType = (typeof CONTENT_TYPES)[number];
 
+export const ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID = "original_serialized_mystery" as const;
+export const FOCUSED_NICHE_IDS = [
+  "philippine_history",
+  "psychology",
+  "mysteries",
+  ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID
+] as const;
+export const SCRIPT_FRAMEWORKS = ["psychology_truth", "history_story", "reddit_story", "serialized_story"] as const;
+export type ScriptFramework = (typeof SCRIPT_FRAMEWORKS)[number];
+
 export const VISUAL_TYPES = ['IMAGE', 'ANIMATED', 'AUTO'] as const;
 export type VisualType = (typeof VISUAL_TYPES)[number];
 
@@ -53,8 +63,41 @@ export interface NicheProfile {
   researchRequirements: string[];
   visualPreferences: string[];
   voicePreferences: VoicePreference;
+  isFictional?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
+}
+
+export interface SerializedStoryState {
+  episodesPerSeries: number;
+  nextSeriesNumber: number;
+  nextEpisodeNumber: number;
+  seriesTitle?: string;
+  premise?: string;
+  setting?: string;
+  characterNotes?: string;
+  lastEpisodeSummary?: string;
+  queuedEpisodeTitle?: string;
+  queuedEpisodeTopic?: string;
+  queuedEpisodePromise?: string;
+}
+
+export interface SerializedStoryCandidate {
+  seriesTitle: string;
+  premise: string;
+  setting: string;
+  characterNotes: string;
+  episodeObjective: string;
+  episodeSummary: string;
+  nextEpisodeTitle?: string;
+  nextEpisodeTopic?: string;
+  nextEpisodePromise?: string;
+}
+
+export interface SerializedStoryAssignment extends SerializedStoryCandidate {
+  seriesNumber: number;
+  episodeNumber: number;
+  episodesPerSeries: number;
 }
 
 export interface VoiceProfile {
@@ -97,6 +140,7 @@ export interface TopicCandidate {
     originality: number;
     retentionPotential: number;
   };
+  serializedStory?: SerializedStoryCandidate;
 }
 
 export interface DuplicateResult {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { AUTOMATION_MODES, CONTENT_TYPES, STORY_FORMATS, VISUAL_TYPES } from '../automation/automation.types';
+import { AUTOMATION_MODES, CONTENT_TYPES, FOCUSED_NICHE_IDS, STORY_FORMATS, VISUAL_TYPES } from '../automation/automation.types';
+import { ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID, MAX_SERIALIZED_STORY_EPISODES_PER_SERIES, MIN_SERIALIZED_STORY_EPISODES_PER_SERIES } from '../automation/serialized-story';
 
 export const projectIdParamsSchema = z.object({ projectId: z.string().min(1) });
 export const projectAccountParamsSchema = z.object({ accountId: z.string().min(1) });
@@ -35,17 +36,22 @@ const projectFields = z.object({
   automationMode: z.enum(AUTOMATION_MODES).default('approval_before_upload'),
   automationEnabled: z.boolean().default(false),
   allowedNarrativeFormats: z.array(z.enum(STORY_FORMATS)).max(STORY_FORMATS.length).optional(),
+  episodesPerSeries: z.coerce.number().int().min(MIN_SERIALIZED_STORY_EPISODES_PER_SERIES).max(MAX_SERIALIZED_STORY_EPISODES_PER_SERIES).optional(),
   redditConfig: redditConfigSchema.optional()
 });
 
 const validateProject = (value: z.infer<typeof projectFields>, context: z.RefinementCtx) => {
   if (value.contentType === 'FACELESS_NICHE' && !value.nicheId)
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['nicheId'], message: 'Select an active niche profile.' });
+  if (value.contentType === 'FACELESS_NICHE' && value.nicheId && !(FOCUSED_NICHE_IDS as readonly string[]).includes(value.nicheId))
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['nicheId'], message: 'Choose one of the four focused niches.' });
   if (value.contentType === 'REDDIT_STORY') {
     if (!value.redditConfig) context.addIssue({ code: z.ZodIssueCode.custom, path: ['redditConfig'], message: 'Reddit source settings are required.' });
     else if (value.redditConfig.sourceMode !== 'AUTO' && !value.redditConfig.subreddits.length)
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['redditConfig', 'subreddits'], message: 'Select at least one subreddit.' });
   }
+  if (value.episodesPerSeries !== undefined && (value.contentType !== 'FACELESS_NICHE' || value.nicheId !== ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID))
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['episodesPerSeries'], message: 'Episodes per series is only available for Original Serialized Mystery Stories.' });
 };
 
 export const createProjectBodySchema = projectFields.superRefine(validateProject);

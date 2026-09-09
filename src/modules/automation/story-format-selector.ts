@@ -1,4 +1,5 @@
 import type { NicheProfile, StoryFormat, TopicCandidate } from "./automation.types";
+import { ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID } from "./serialized-story";
 
 const SIGNALS: Partial<Record<StoryFormat, string[]>> = {
   record_breaking_moment: ["record", "fastest", "highest", "first", "most"], controversy: ["controversy", "banned", "scandal", "disputed"],
@@ -24,7 +25,8 @@ export class StoryFormatSelector {
       .sort((a, b) => b.score - a.score)[0]?.format ?? profile.preferredStoryFormats[0];
   }
 
-  public framework(format: StoryFormat, nicheId?: string): "psychology_truth" | "history_story" {
+  public framework(format: StoryFormat, nicheId?: string): "psychology_truth" | "history_story" | "serialized_story" {
+    if (nicheId === ORIGINAL_SERIALIZED_MYSTERY_NICHE_ID) return "serialized_story";
     return nicheId === "psychology" || format === "psychological_explanation" ? "psychology_truth" : "history_story";
   }
 }
