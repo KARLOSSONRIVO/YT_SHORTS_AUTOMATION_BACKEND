@@ -381,32 +381,34 @@ export class AutomationService {
       ? await this.reservePhilippineHistoryNextCandidate(projectId, project, date, candidates ?? [], selected, history, generationIdempotencyKey, topicReservations)
       : undefined;
     if (isPhilippineHistory && !nextCandidate) {
-      try {
-        const refreshedNextCandidates = await this.research.generate({
-          profile,
-          language: project.language!,
-          region: profile.region,
-          recentTopics: [...new Set([
-            selected.topic,
-            ...topicReservations.flatMap((reservation) => [reservation.topic, reservation.title]),
-            ...history.map((item) => item.topic)
-          ])].slice(0, 50),
-          recentEntities: [...new Set([...selected.importantEntities, ...history.flatMap((item) => item.importantEntities)])].slice(0, 50)
-        });
-        nextCandidate = await this.reservePhilippineHistoryNextCandidate(
-          projectId,
-          project,
-          date,
-          refreshedNextCandidates,
-          selected,
-          history,
-          generationIdempotencyKey,
-          topicReservations
-        );
-      } catch {
-        // The current story can still be generated with the generic series promise.
-        nextCandidate = undefined;
-      }
+      const refreshedNextCandidates = await this.research.generate({
+        profile,
+        language: project.language!,
+        region: profile.region,
+        recentTopics: [...new Set([
+          selected.topic,
+          ...topicReservations.flatMap((reservation) => [reservation.topic, reservation.title]),
+          ...history.map((item) => item.topic)
+        ])].slice(0, 50),
+        recentEntities: [...new Set([...selected.importantEntities, ...history.flatMap((item) => item.importantEntities)])].slice(0, 50)
+      });
+      nextCandidate = await this.reservePhilippineHistoryNextCandidate(
+        projectId,
+        project,
+        date,
+        refreshedNextCandidates,
+        selected,
+        history,
+        generationIdempotencyKey,
+        topicReservations
+      );
+    }
+    if (isPhilippineHistory && !nextCandidate && typeof this.repository.reserveTopic === "function") {
+      throw new AppError(
+        "A next Philippine-history story could not be reserved. The generation will retry before creating a video.",
+        503,
+        "PHILIPPINE_HISTORY_NEXT_STORY_UNAVAILABLE"
+      );
     }
     if (redditSelection) await this.repository.logActivity({ projectId: project._id, userId: project.userId, type: "reddit_source_selected", severity: "info",
       message: `Selected Reddit source from r/${redditSelection.post.subreddit}: ${redditSelection.post.title}`,
@@ -512,7 +514,10 @@ export class AutomationService {
   public async stories(userId: string, projectId: string) { await this.ownedProject(userId, projectId); return this.repository.findHistoryForProject(projectId); }
   public async rejected(userId: string, projectId: string) { await this.ownedProject(userId, projectId); return this.repository.findRejected(projectId); }
   public async activity(userId: string, projectId: string) { await this.ownedProject(userId, projectId); return this.repository.findActivity(projectId); }
-  public async deleteProjectData(userId: string, projectId: string) { await this.ownedProject(userId, projectId); return this.repository.deleteProjectData(projectId); }
+  public async deleteProjectData(userId: string, projectId: string) {
+    await this.projects.getOwnedProjectOrThrow(projectId, userId);
+    return this.repository.deleteProjectData(projectId);
+  }
 
   public async approve(userId: string, projectId: string, contentId: string) {
     await this.ownedProject(userId, projectId);

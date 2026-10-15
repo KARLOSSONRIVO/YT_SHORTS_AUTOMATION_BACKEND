@@ -20,4 +20,13 @@ export class UploadController {
 
     sendSuccess(response, result, 201);
   };
+
+  public createYouTubeSource = async (request: Request, response: Response): Promise<void> => {
+    const result = await this.uploadService.createYouTubeSourceWorkflow({
+      ...request.body,
+      userId: getAuthenticatedUser(request).id
+    });
+
+    sendSuccess(response, result, 201);
+  };
 }

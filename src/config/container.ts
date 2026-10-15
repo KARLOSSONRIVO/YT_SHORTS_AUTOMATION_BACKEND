@@ -9,6 +9,7 @@ import { closeQueues, createQueues } from "../infrastructure/queue/queues";
 import { createRedisConnection } from "../infrastructure/redis/redis.connection";
 import { LocalStorageClient } from "../infrastructure/storage/storage.client";
 import { YouTubeClient } from "../infrastructure/youtube/youtube.client";
+import { YouTubeSourceDownloader } from "../infrastructure/youtube/youtube-source-downloader";
 import { AuthController } from "../modules/controllers/auth/auth.controller";
 import { ChannelController } from "../modules/controllers/channel/channel.controller";
 import { ClipController } from "../modules/controllers/clip/clip.controller";
@@ -87,6 +88,7 @@ export const createApplicationContainer = async () => {
   });
 
   const storageService = new StorageService(storageClient);
+  const youtubeSourceDownloader = new YouTubeSourceDownloader(env.YTDLP_PATH, undefined, env.YTDLP_TIMEOUT_MS);
   await storageService.ensureReady();
   await fs.mkdir(env.TEMP_UPLOAD_DIR, { recursive: true });
 
@@ -110,7 +112,8 @@ export const createApplicationContainer = async () => {
     projectService,
     sourceVideoService,
     queueService,
-    jobService
+    jobService,
+    youtubeSourceDownloader
   );
   const renderService = new RenderService(
     configuredPythonWorkerClient,

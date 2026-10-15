@@ -13,7 +13,7 @@ export interface ProjectSubtitlePreferences {
 }
 
 export const DEFAULT_PROJECT_SUBTITLE_PREFERENCES: ProjectSubtitlePreferences = {
-  fontFamily: "Bebas Neue",
+  fontFamily: "DejaVu Sans",
   fontSize: 92,
   fillColor: "#FFFFFF",
   strokeColor: "#000000",

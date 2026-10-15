@@ -24,6 +24,8 @@ const envSchema = z.object({
   MAX_FILE_SIZE_BYTES: z.coerce.number().int().positive().default(1024 * 1024 * 1024),
   FFMPEG_PATH: z.string().default("ffmpeg"),
   FFPROBE_PATH: z.string().default("ffprobe"),
+  YTDLP_PATH: z.string().default("yt-dlp"),
+  YTDLP_TIMEOUT_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
   GROQ_API_KEY: z.string().min(1).optional(),
   GROQ_TOPIC_RESEARCH_MODEL: z.string().default("groq/compound-mini"),
   GROQ_TOPIC_RESEARCH_FALLBACK_MODEL: z.string().default("qwen/qwen3.6-27b"),

@@ -1,6 +1,11 @@
 import { AppError } from "../../common/errors/app-error";
 const TEMPORARY_CODES = new Set(["ECONNRESET","ETIMEDOUT","ECONNREFUSED","RATE_LIMITED","DAILY_UPLOAD_LIMIT_REACHED"]);
-const RETRYABLE_RESEARCH_CODES = new Set(["RESEARCH_RESPONSE_INVALID", "INSUFFICIENT_RESEARCH_CANDIDATES", "GROQ_COMPOUND_REQUEST_TOO_LARGE"]);
+const RETRYABLE_RESEARCH_CODES = new Set([
+  "RESEARCH_RESPONSE_INVALID",
+  "INSUFFICIENT_RESEARCH_CANDIDATES",
+  "GROQ_COMPOUND_REQUEST_TOO_LARGE",
+  "PHILIPPINE_HISTORY_NEXT_STORY_UNAVAILABLE"
+]);
 export const isRateLimitFailure = (error: unknown) => {
   if (error instanceof AppError) return error.statusCode === 429 && !["AUTOMATION_JOB_QUEUED", "DAILY_UPLOAD_LIMIT_REACHED"].includes(error.code);
   const responseStatus = typeof error === "object" && error && "response" in error ? Number((error as {response?:{status?:unknown}}).response?.status) : 0;

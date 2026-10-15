@@ -5,6 +5,7 @@ export interface Clip {
   sourceVideoId: Types.ObjectId;
   transcriptId?: Types.ObjectId;
   title: string;
+  hashtags?: string;
   description?: string;
   startTimeSeconds: number;
   endTimeSeconds: number;
@@ -25,6 +26,7 @@ const clipSchema = new Schema<Clip>(
     sourceVideoId: { type: Schema.Types.ObjectId, ref: "SourceVideo", required: true, index: true },
     transcriptId: { type: Schema.Types.ObjectId, ref: "Transcript" },
     title: { type: String, required: true, trim: true },
+    hashtags: { type: String, trim: true },
     description: { type: String, trim: true },
     startTimeSeconds: { type: Number, required: true },
     endTimeSeconds: { type: Number, required: true },

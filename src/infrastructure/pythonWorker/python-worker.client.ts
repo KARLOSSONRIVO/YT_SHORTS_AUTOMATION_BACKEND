@@ -337,7 +337,7 @@ export class PythonWorkerClient {
         transcript_json: input.transcriptJson,
         ...(input.titleHint ? { title_hint: input.titleHint } : {}),
         score: `${input.score ?? 0}`,
-        font_family: input.fontFamily ?? "Bebas Neue",
+        font_family: input.fontFamily ?? "DejaVu Sans",
         font_size: `${input.fontSize ?? 92}`,
         fill_color: input.fillColor ?? "#FFFFFF",
         stroke_color: input.strokeColor ?? "#000000",

@@ -6,6 +6,7 @@ export interface SourceVideo {
   mimeType: string;
   storageKey: string;
   sizeBytes: number;
+  sourceUrl?: string;
   durationSeconds?: number;
   width?: number;
   height?: number;
@@ -19,6 +20,7 @@ const sourceVideoSchema = new Schema<SourceVideo>(
     mimeType: { type: String, required: true },
     storageKey: { type: String, required: true },
     sizeBytes: { type: Number, required: true },
+    sourceUrl: { type: String, trim: true },
     durationSeconds: { type: Number },
     width: { type: Number },
     height: { type: Number },

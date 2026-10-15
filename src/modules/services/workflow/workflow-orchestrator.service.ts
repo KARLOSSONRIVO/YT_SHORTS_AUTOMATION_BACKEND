@@ -7,6 +7,7 @@ import {
 } from "../../../infrastructure/pythonWorker/python-worker.client";
 import { QUEUE_NAMES } from "../../../infrastructure/queue/queue.names";
 import { ClipService } from "../clip/clip.service";
+import { buildClipMetadata, buildClipTargetKeywords } from "../clip/clip-metadata";
 import { JobService } from "../job/job.service";
 import { ProjectService } from "../project/project.service";
 import { PublishService } from "../publish/publish.service";
@@ -22,6 +23,7 @@ interface IngestPayload {
   projectId: string;
   sourceVideoId: string;
   storageKey: string;
+  languageHint?: string;
 }
 
 interface TranscriptionPayload extends IngestPayload {
@@ -152,26 +154,26 @@ export class WorkflowOrchestratorService {
     switch (input.queueName) {
       case QUEUE_NAMES.TRANSCRIPTION:
         enqueuedJob = await this.queueService.addTranscriptionJob({
-          jobId: persistedJob.id,
-          ...input.payload
+          ...input.payload,
+          jobId: persistedJob.id
         });
         break;
       case QUEUE_NAMES.ANALYSIS:
         enqueuedJob = await this.queueService.addAnalysisJob({
-          jobId: persistedJob.id,
-          ...input.payload
+          ...input.payload,
+          jobId: persistedJob.id
         });
         break;
       case QUEUE_NAMES.RENDER:
         enqueuedJob = await this.queueService.addRenderJob({
-          jobId: persistedJob.id,
-          ...input.payload
+          ...input.payload,
+          jobId: persistedJob.id
         });
         break;
       case QUEUE_NAMES.UPLOAD:
         enqueuedJob = await this.queueService.addUploadJob({
-          jobId: persistedJob.id,
-          ...input.payload
+          ...input.payload,
+          jobId: persistedJob.id
         });
         break;
       default:
@@ -272,14 +274,20 @@ export class WorkflowOrchestratorService {
     projectId: string,
     sourceVideoId: string,
     transcriptId: string,
-    response: PythonAnalysisResponse
+    response: PythonAnalysisResponse,
+    project: { title?: string; hashtags?: string }
   ) {
     const createdClips = await this.clipService.createCandidateClips(
       response.clips.map((clip) => ({
         projectId,
         sourceVideoId,
         transcriptId,
-        title: (clip.title_hint || clip.transcript_excerpt || "Generated clip").slice(0, 100),
+        ...buildClipMetadata({
+          transcript: clip.transcript_excerpt,
+          titleHint: clip.title_hint,
+          projectTitle: project.title,
+          projectHashtags: project.hashtags
+        }),
         description: clip.transcript_excerpt.slice(0, 5000),
         startTimeSeconds: clip.start,
         endTimeSeconds: clip.end,
@@ -321,14 +329,19 @@ export class WorkflowOrchestratorService {
         fileName: sourceVideo.originalFileName,
         mimeType: sourceVideo.mimeType,
         language: payload.languageHint,
-        topK: project.targetClipCount
+        topK: project.targetClipCount,
+        targetKeywords: buildClipTargetKeywords({
+          projectTitle: project.title,
+          projectHashtags: project.hashtags
+        })
       });
 
       const createdClips = await this.persistAnalysisArtifacts(
         payload.projectId,
         sourceVideo.id,
         transcript.id,
-        response
+        response,
+        project
       );
 
       const dimensions = extractVideoDimensions(response.media);
@@ -336,12 +349,7 @@ export class WorkflowOrchestratorService {
         status: "processed",
         ...dimensions
       });
-      if (createdClips.length > 0) {
-        await Promise.all(createdClips.map((clip) => this.renderService.queueRender(clip.id, payload.projectId)));
-        await this.projectService.updateWorkflow(payload.projectId, "render", "processing");
-      } else {
-        await this.projectService.updateWorkflow(payload.projectId, "review", "review");
-      }
+      await this.projectService.updateWorkflow(payload.projectId, "review", "review");
       await this.markJobCompleted(payload.jobId, {
         clipCount: createdClips.length,
         warnings: response.warnings

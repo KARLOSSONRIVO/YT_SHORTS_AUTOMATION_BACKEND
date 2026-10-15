@@ -7,6 +7,7 @@ export interface CreateSourceVideoInput {
   mimeType: string;
   storageKey: string;
   sizeBytes: number;
+  sourceUrl?: string;
 }
 
 export class SourceVideoService {
@@ -19,6 +20,7 @@ export class SourceVideoService {
       mimeType: input.mimeType,
       storageKey: input.storageKey,
       sizeBytes: input.sizeBytes,
+      sourceUrl: input.sourceUrl,
       status: "uploaded"
     });
   }

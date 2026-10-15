@@ -6,6 +6,7 @@ export interface CandidateClipInput {
   sourceVideoId: string;
   transcriptId?: string;
   title: string;
+  hashtags?: string;
   description?: string;
   startTimeSeconds: number;
   endTimeSeconds: number;

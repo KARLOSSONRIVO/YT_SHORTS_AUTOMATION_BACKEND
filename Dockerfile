@@ -23,7 +23,11 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg python3 py3-pip \
+  && python3 -m venv /opt/yt-dlp \
+  && /opt/yt-dlp/bin/pip install --no-cache-dir yt-dlp
+
+ENV YTDLP_PATH=/opt/yt-dlp/bin/yt-dlp
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
