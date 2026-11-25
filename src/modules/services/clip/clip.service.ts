@@ -1,5 +1,9 @@
+import { AppError } from "../../../common/errors/app-error";
 import { NotFoundError } from "../../../common/errors/not-found-error";
 import { ClipRepository } from "../../repositories/clip.repository";
+
+import type { Clip } from "../../models/clip.model";
+import type { ClipRange } from "../../validators/clip.validator";
 
 export interface CandidateClipInput {
   projectId: string;
@@ -45,12 +49,29 @@ export class ClipService {
     return clip;
   }
 
-  public async reviewClip(clipId: string, reviewStatus: "approved" | "rejected") {
+  public async reviewClip(
+    clipId: string,
+    reviewStatus: "approved" | "rejected",
+    edits: Pick<Clip, "verticalLayout" | "captionPlacement" | "captionPreset" | "captionFontSize"> & { clipRange?: ClipRange } = {}
+  ) {
+    const { verticalLayout, captionPlacement, captionPreset, captionFontSize, clipRange } = edits;
     const publishStatus = reviewStatus === "approved" ? "queued" : "not_ready";
-    return this.clipRepository.updateById(clipId, {
-      reviewStatus,
-      publishStatus
-    });
+    if (reviewStatus === "approved" && (verticalLayout || clipRange || captionPlacement || captionPreset || captionFontSize !== undefined)) {
+      const clip = await this.clipRepository.approveEditedClip(clipId, {
+        ...(verticalLayout && { verticalLayout }),
+        ...(captionPlacement && { captionPlacement }),
+        ...(captionPreset && { captionPreset }),
+        ...(captionFontSize !== undefined && { captionFontSize }),
+        ...(clipRange && {
+          ...clipRange,
+          durationSeconds: clipRange.endTimeSeconds - clipRange.startTimeSeconds,
+          rangeEdited: true
+        })
+      });
+      if (!clip) throw new AppError("This clip is no longer available for editing.", 409, "CLIP_REVIEW_CONFLICT");
+      return clip;
+    }
+    return this.clipRepository.updateById(clipId, { reviewStatus, publishStatus });
   }
 
   public markRendered(clipId: string, outputStorageKey: string) {

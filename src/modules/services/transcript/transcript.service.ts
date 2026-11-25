@@ -45,12 +45,16 @@ export class TranscriptService {
   }
 
   public async getByProjectIdOrThrow(projectId: string) {
-    const transcript = await this.transcriptRepository.findByProjectId(projectId);
+    const transcript = await this.findByProjectId(projectId);
     if (!transcript) {
       throw new NotFoundError("Transcript not found for project.", { projectId });
     }
 
     return transcript;
+  }
+
+  public findByProjectId(projectId: string) {
+    return this.transcriptRepository.findByProjectId(projectId);
   }
 
   public requestTranscription(jobId: string, projectId: string, sourceVideoPath: string, languageHint?: string) {

@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { AppError } from "../../common/errors/app-error";
+import { logger } from "../../config/logger";
 
 export interface DownloadedYouTubeSource {
   filePath: string;
@@ -37,7 +39,7 @@ const errorMessage = (error: unknown): string => {
   }
 
   const stderr = "stderr" in error && typeof error.stderr === "string" ? error.stderr.trim() : "";
-  return stderr || error.message || "YouTube source download failed.";
+  return stderr.split(/\r?\n/).reverse().find((line) => line.startsWith("ERROR:")) || stderr || error.message;
 };
 
 export class YouTubeSourceDownloader {
@@ -53,10 +55,12 @@ export class YouTubeSourceDownloader {
     const outputTemplate = path.join(directory, `${baseName}.%(ext)s`);
     const args = [
       "--no-playlist",
-      "--no-progress",
-      "--quiet",
+      "--js-runtimes",
+      "node",
       "--format",
       "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+      "--no-progress",
+      "--quiet",
       "--merge-output-format",
       "mp4",
       "--output",
@@ -86,7 +90,16 @@ export class YouTubeSourceDownloader {
       };
     } catch (error) {
       await this.cleanup({ directory } as DownloadedYouTubeSource);
-      throw new Error(`Could not prepare the YouTube source: ${errorMessage(error)}`);
+      if (error instanceof AppError) throw error;
+      logger.warn("YouTube source download failed.", { reason: errorMessage(error) });
+      if (error instanceof Error && "killed" in error && error.killed) {
+        throw new AppError("The YouTube download timed out. Try a shorter video.", 504, "YOUTUBE_SOURCE_TIMEOUT");
+      }
+      throw new AppError(
+        "The server could not download this video from YouTube. Check that it is publicly playable, or upload the video file.",
+        502,
+        "YOUTUBE_SOURCE_DOWNLOAD_FAILED"
+      );
     }
   }
 

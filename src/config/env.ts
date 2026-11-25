@@ -21,7 +21,6 @@ const envSchema = z.object({
   AUTH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
   STORAGE_ROOT: z.string().default("./storage"),
   TEMP_UPLOAD_DIR: z.string().default("./storage/tmp"),
-  MAX_FILE_SIZE_BYTES: z.coerce.number().int().positive().default(1024 * 1024 * 1024),
   FFMPEG_PATH: z.string().default("ffmpeg"),
   FFPROBE_PATH: z.string().default("ffprobe"),
   YTDLP_PATH: z.string().default("yt-dlp"),

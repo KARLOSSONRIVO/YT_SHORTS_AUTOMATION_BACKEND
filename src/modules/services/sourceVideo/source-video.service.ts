@@ -1,5 +1,7 @@
 import { NotFoundError } from "../../../common/errors/not-found-error";
+import type { MediaInspectionService } from "../../automation/media-inspection.service";
 import { SourceVideoRepository } from "../../repositories/source-video.repository";
+import type { StorageService } from "../storage/storage.service";
 
 export interface CreateSourceVideoInput {
   projectId: string;
@@ -11,7 +13,15 @@ export interface CreateSourceVideoInput {
 }
 
 export class SourceVideoService {
-  constructor(private readonly sourceVideoRepository: SourceVideoRepository) {}
+  constructor(
+    private readonly sourceVideoRepository: SourceVideoRepository,
+    private readonly storageService: StorageService,
+    private readonly mediaInspectionService: MediaInspectionService
+  ) {}
+
+  public readDurationSeconds(storageKey: string) {
+    return this.mediaInspectionService.readDurationSeconds(this.storageService.resolveStoragePath(storageKey));
+  }
 
   public createSourceVideo(input: CreateSourceVideoInput) {
     return this.sourceVideoRepository.create({

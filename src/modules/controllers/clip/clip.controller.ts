@@ -1,10 +1,14 @@
 import type { Request, Response } from "express";
+import { AppError } from "../../../common/errors/app-error";
+import { getAuthenticatedUser } from "../../../common/middlewares/require-auth.middleware";
 import { sendSuccess } from "../../../common/utils/api-response";
 import { ClipService } from "../../services/clip/clip.service";
 import { ProjectService } from "../../services/project/project.service";
 import { RenderService } from "../../services/render/render.service";
 import { SourceVideoService } from "../../services/sourceVideo/source-video.service";
 import { UploadHistoryRepository } from "../../repositories/upload-history.repository";
+import type { reviewClipBodySchema } from "../../validators/clip.validator";
+import type { z } from "zod";
 
 export class ClipController {
   constructor(
@@ -58,6 +62,7 @@ export class ClipController {
 
   public listClips = async (request: Request, response: Response): Promise<void> => {
     const projectId = String(request.query.projectId);
+    await this.projectService.getOwnedProjectOrThrow(projectId, getAuthenticatedUser(request).id);
     const [clips, sourceVideo] = await Promise.all([
       this.clipService.listByProjectId(projectId),
       this.sourceVideoService.getByProjectIdOrThrow(projectId)
@@ -97,13 +102,32 @@ export class ClipController {
 
   public reviewClip = async (request: Request, response: Response): Promise<void> => {
     const clipId = String(request.params.clipId);
-    let clip = await this.clipService.reviewClip(clipId, request.body.reviewStatus);
+    const existing = await this.clipService.getClipOrThrow(clipId);
+    const projectId = String(existing.projectId);
+    await this.projectService.getOwnedProjectOrThrow(projectId, getAuthenticatedUser(request).id);
+    const { reviewStatus, ...edits }: z.infer<typeof reviewClipBodySchema> = request.body;
+    const { clipRange } = edits;
+    const sourceVideo = await this.sourceVideoService.getByProjectIdOrThrow(projectId);
 
-    if (request.body.reviewStatus === "approved" && clip && !clip.outputStorageKey) {
+    if (clipRange) {
+      const sourceDuration = await this.sourceVideoService.readDurationSeconds(sourceVideo.storageKey);
+      if (!Number.isFinite(sourceDuration) || sourceDuration <= 0) {
+        throw new AppError("The source duration could not be verified.", 422, "SOURCE_DURATION_UNAVAILABLE");
+      }
+      const endTimeSeconds = Math.min(clipRange.endTimeSeconds, sourceDuration);
+      if (clipRange.endTimeSeconds > sourceDuration + 0.001 || endTimeSeconds - clipRange.startTimeSeconds < 0.1 - 1e-9) {
+        throw new AppError("Choose a range of at least 0.1 seconds within the source video.", 422, "INVALID_CLIP_RANGE");
+      }
+      clipRange.endTimeSeconds = endTimeSeconds;
+    }
+
+    let clip = await this.clipService.reviewClip(clipId, reviewStatus, edits);
+
+    if (reviewStatus === "approved" && clip && !clip.outputStorageKey) {
       await this.renderService.queueRender(clip.id, `${clip.projectId}`);
     }
 
-    if (request.body.reviewStatus === "rejected" && clip?.outputStorageKey) {
+    if (reviewStatus === "rejected" && clip?.outputStorageKey) {
       await this.renderService.deleteRenderedClipAssets(clip.outputStorageKey, clip.subtitleStorageKey);
       clip = await this.clipService.clearRenderedOutput(clipId);
     }
@@ -112,12 +136,7 @@ export class ClipController {
       await this.syncUploadedVideoProjectWorkflow(`${clip.projectId}`);
     }
 
-    const [sourceVideo, latestUpload] = clip
-      ? await Promise.all([
-          this.sourceVideoService.getByProjectIdOrThrow(`${clip.projectId}`),
-          this.uploadHistoryRepository.findLatestByClipId(clip.id)
-        ])
-      : [undefined, undefined];
+    const latestUpload = clip ? await this.uploadHistoryRepository.findLatestByClipId(clip.id) : undefined;
 
     sendSuccess(
       response,

@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { CAPTION_FONT_SIZE, CAPTION_PRESETS } from "../models/project.model";
 
 const hexColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Use a hex color like #FFFFFF");
+const fontSize = z.coerce.number().int().min(CAPTION_FONT_SIZE.min).max(CAPTION_FONT_SIZE.max);
 
 export const isYouTubeSourceUrl = (value: string): boolean => {
   try {
@@ -17,8 +19,9 @@ export const isYouTubeSourceUrl = (value: string): boolean => {
 };
 
 const subtitlePreferencesSchema = z.object({
+  preset: z.enum([...CAPTION_PRESETS, "custom"]).optional(),
   fontFamily: z.string().min(1).max(120),
-  fontSize: z.coerce.number().int().min(24).max(120),
+  fontSize,
   fillColor: hexColor,
   strokeColor: hexColor,
   highlightColor: hexColor,
@@ -32,8 +35,9 @@ export const createUploadBodySchema = z.object({
   description: z.string().max(5000).optional(),
   hashtags: z.string().max(300).optional(),
   targetClipCount: z.coerce.number().int().min(1).max(20).optional(),
+  preset: z.enum([...CAPTION_PRESETS, "custom"]).optional(),
   fontFamily: z.string().min(1).max(120).optional(),
-  fontSize: z.coerce.number().int().min(24).max(120).optional(),
+  fontSize: fontSize.optional(),
   fillColor: hexColor.optional(),
   strokeColor: hexColor.optional(),
   highlightColor: hexColor.optional(),

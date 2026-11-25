@@ -1,24 +1,14 @@
-import { UnrecoverableError, Worker, type Processor } from "bullmq";
+import { Worker, type Processor } from "bullmq";
 import { createApplicationContainer } from "./config/container";
 import { logger } from "./config/logger";
 import { QUEUE_NAMES } from "./infrastructure/queue/queue.names";
-import { isRateLimitFailure } from "./modules/automation/retry-policy";
-import { createWorkerOptions, providerFailureMetadata, shouldRetryAutomationFailure } from "./modules/automation/automation-worker-policy";
-
-const unrecoverableWithCause = (error: unknown, fallback: string) => {
-  const wrapped = new UnrecoverableError(error instanceof Error ? error.message : fallback);
-  wrapped.cause = error;
-  return wrapped;
-};
+import { env } from "./config/env";
 
 const bootstrap = async () => {
   const container = await createApplicationContainer();
   const connection = container.redisConnection;
   const workflowOrchestratorService = container.services.workflowOrchestratorService;
-  const facelessVideoService = container.services.facelessVideoService;
-  const automationService = container.services.automationService;
-
-  const workerOptions = createWorkerOptions(connection);
+  const workerOptions = { shared: { connection, concurrency: env.QUEUE_WORKER_CONCURRENCY } };
 
   const workers = [
     new Worker(
@@ -35,24 +25,6 @@ const bootstrap = async () => {
       QUEUE_NAMES.ANALYSIS,
       (async (job) => workflowOrchestratorService.processAnalysis(job.data)) as Processor,
       workerOptions.shared
-    ),
-    new Worker(
-      QUEUE_NAMES.STORY,
-      (async (job) => { try { return await facelessVideoService.processStage(job.data); } catch (error) {
-        if (!isRateLimitFailure(error)) throw unrecoverableWithCause(error, "Permanent story-stage failure");
-        throw error;
-      } }) as Processor,
-      workerOptions.story
-    ),
-    new Worker(
-      QUEUE_NAMES.AUTOMATION,
-      (async (job) => { const automationRunId = job.id == null ? undefined : String(job.id); try { return await automationService.execute(String(job.data.projectId), job.data.scheduledDate ? String(job.data.scheduledDate) : undefined,
-        job.data.trigger === "manual" ? "manual" : "scheduled", automationRunId); } catch (error) {
-        await automationService.recordFailure(String(job.data.projectId), error, automationRunId).catch(() => undefined);
-        if (!shouldRetryAutomationFailure(error, job.attemptsMade)) throw unrecoverableWithCause(error, "Permanent automation failure");
-        throw error;
-      } }) as Processor,
-      workerOptions.automation
     ),
     new Worker(
       QUEUE_NAMES.RENDER,
@@ -81,13 +53,12 @@ const bootstrap = async () => {
         bullJobId: job?.id,
         name: job?.name,
         message: error.message,
-        ...providerFailureMetadata(error)
       });
     });
   }
 
   logger.info("Backend worker process started.", {
-    queues: Object.values(QUEUE_NAMES)
+    queues: workers.map((worker) => worker.name)
   });
 
   const shutdown = async (signal: string) => {

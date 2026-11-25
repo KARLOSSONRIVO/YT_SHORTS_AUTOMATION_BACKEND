@@ -1,7 +1,12 @@
 import { HydratedDocument, Schema, Types, model } from "mongoose";
 import { AUTOMATION_MODES, CONTENT_TYPES, SCRIPT_FRAMEWORKS, STORY_FORMATS, VISUAL_TYPES, type AutomationMode, type ContentType, type ScriptFramework, type SerializedStoryAssignment, type SerializedStoryState, type StoryFormat, type VisualType } from "../automation/automation.types";
 
+export const CAPTION_PRESETS = ["bold_stroke", "red_highlight", "karaoke"] as const;
+export const CAPTION_FONT_SIZE = { min: 24, max: 120 } as const;
+export type CaptionPreset = typeof CAPTION_PRESETS[number];
+
 export interface ProjectSubtitlePreferences {
+  preset?: CaptionPreset | "custom";
   fontFamily: string;
   fontSize: number;
   fillColor: string;
@@ -17,7 +22,7 @@ export const DEFAULT_PROJECT_SUBTITLE_PREFERENCES: ProjectSubtitlePreferences = 
   fontSize: 92,
   fillColor: "#FFFFFF",
   strokeColor: "#000000",
-  highlightColor: "#FFD54A",
+  highlightColor: "#FFFFFF",
   position: "middle_center",
   maxCharsPerLine: 18,
   maxLines: 2
@@ -107,6 +112,7 @@ export interface Project {
 
 const subtitlePreferencesSchema = new Schema<ProjectSubtitlePreferences>(
   {
+    preset: { type: String, enum: [...CAPTION_PRESETS, "custom"] },
     fontFamily: { type: String, required: true, default: DEFAULT_PROJECT_SUBTITLE_PREFERENCES.fontFamily },
     fontSize: { type: Number, required: true, default: DEFAULT_PROJECT_SUBTITLE_PREFERENCES.fontSize },
     fillColor: { type: String, required: true, default: DEFAULT_PROJECT_SUBTITLE_PREFERENCES.fillColor },
@@ -166,7 +172,7 @@ const projectSchema = new Schema<Project>(
     name: { type: String, trim: true },
     description: { type: String, trim: true },
     hashtags: { type: String, trim: true },
-    targetClipCount: { type: Number, min: 1, max: 20, default: 5 },
+    targetClipCount: { type: Number, min: 1, max: 20 },
     projectType: {
       type: String,
       enum: ["uploaded_video", "faceless_story"],

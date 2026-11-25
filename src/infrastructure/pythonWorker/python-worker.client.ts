@@ -291,7 +291,7 @@ export class PythonWorkerClient {
         ...(input.language ? { language: input.language } : {}),
         min_clip_duration: `${input.minClipDuration ?? 15}`,
         max_clip_duration: `${input.maxClipDuration ?? 45}`,
-        top_k: `${input.topK ?? 5}`,
+        ...(input.topK === undefined ? {} : { top_k: `${input.topK}` }),
         target_keywords: (input.targetKeywords ?? []).join(",")
       }
     });
@@ -312,9 +312,13 @@ export class PythonWorkerClient {
     mimeType: string;
     clipStart: number;
     clipEnd: number;
+    exactTiming?: boolean;
+    verticalLayoutJson?: string;
     titleHint?: string;
     score?: number;
     transcriptJson: string;
+    captionPreset?: "bold_stroke" | "red_highlight" | "karaoke" | "custom";
+    captionPlacement?: { x: number; y: number };
     fontFamily?: string;
     fontSize?: number;
     fillColor?: string;
@@ -334,7 +338,11 @@ export class PythonWorkerClient {
         ...(input.projectTitle ? { project_title: input.projectTitle } : {}),
         clip_start: `${input.clipStart}`,
         clip_end: `${input.clipEnd}`,
+        ...(input.exactTiming ? { exact_timing: "true" } : {}),
+        ...(input.verticalLayoutJson ? { vertical_layout_json: input.verticalLayoutJson } : {}),
         transcript_json: input.transcriptJson,
+        ...(input.captionPreset ? { caption_preset: input.captionPreset } : {}),
+        ...(input.captionPlacement ? { caption_x: `${input.captionPlacement.x}`, caption_y: `${input.captionPlacement.y}` } : {}),
         ...(input.titleHint ? { title_hint: input.titleHint } : {}),
         score: `${input.score ?? 0}`,
         font_family: input.fontFamily ?? "DejaVu Sans",

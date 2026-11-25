@@ -1,8 +1,4 @@
 import { QUEUE_NAMES } from "../../../infrastructure/queue/queue.names";
-import {
-  DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
-  type ProjectSubtitlePreferences
-} from "../../models/project.model";
 import { PythonWorkerClient } from "../../../infrastructure/pythonWorker/python-worker.client";
 import { ClipService } from "../clip/clip.service";
 import { JobService } from "../job/job.service";
@@ -11,6 +7,7 @@ import { QueueService } from "../queue/queue.service";
 import { SourceVideoService } from "../sourceVideo/source-video.service";
 import { StorageService } from "../storage/storage.service";
 import { TranscriptService } from "../transcript/transcript.service";
+import { resolveSubtitlePreferences } from "../subtitle/subtitle-preferences";
 
 const WORD_LEAD_IN_SECONDS = 0.35;
 
@@ -67,15 +64,6 @@ export class RenderService {
     };
   }
 
-  private buildSubtitlePreferences(
-    projectSubtitlePreferences?: Partial<ProjectSubtitlePreferences>
-  ): ProjectSubtitlePreferences {
-    return {
-      ...DEFAULT_PROJECT_SUBTITLE_PREFERENCES,
-      ...(projectSubtitlePreferences ?? {})
-    };
-  }
-
   public async renderClip(projectId: string, clipId: string) {
     const [clip, sourceVideo, transcript, project] = await Promise.all([
       this.clipService.getClipOrThrow(clipId),
@@ -85,7 +73,7 @@ export class RenderService {
     ]);
 
     const sourcePath = this.storageService.resolveStoragePath(sourceVideo.storageKey);
-    const subtitlePreferences = this.buildSubtitlePreferences(project.subtitlePreferences);
+    const subtitlePreferences = resolveSubtitlePreferences(project.subtitlePreferences, clip);
     const pythonRenderResult = await this.pythonWorkerClient.requestRenderedClipUpload({
       jobId: clipId,
       projectId,
@@ -93,11 +81,15 @@ export class RenderService {
       filePath: sourcePath,
       fileName: sourceVideo.originalFileName,
       mimeType: sourceVideo.mimeType,
-      clipStart: Math.max(clip.startTimeSeconds - WORD_LEAD_IN_SECONDS, 0),
+      clipStart: clip.rangeEdited ? clip.startTimeSeconds : Math.max(clip.startTimeSeconds - WORD_LEAD_IN_SECONDS, 0),
       clipEnd: clip.endTimeSeconds,
+      exactTiming: clip.rangeEdited,
+      verticalLayoutJson: clip.verticalLayout ? JSON.stringify(clip.verticalLayout) : undefined,
       titleHint: clip.title,
       score: clip.score,
       transcriptJson: JSON.stringify(this.buildTranscriptPayload(transcript)),
+      captionPreset: subtitlePreferences.preset,
+      captionPlacement: clip.captionPlacement && { x: clip.captionPlacement.x, y: clip.captionPlacement.y },
       fontFamily: subtitlePreferences.fontFamily,
       fontSize: subtitlePreferences.fontSize,
       fillColor: subtitlePreferences.fillColor,

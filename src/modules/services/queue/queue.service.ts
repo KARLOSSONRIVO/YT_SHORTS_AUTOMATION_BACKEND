@@ -6,7 +6,9 @@ export class QueueService {
   constructor(private readonly queues: QueueRegistry) {}
 
   private add(queueName: keyof typeof QUEUE_NAMES, name: string, payload: Record<string, unknown>, options?: JobsOptions) {
-    return this.queues[QUEUE_NAMES[queueName]].add(name, payload, options);
+    const queue = this.queues[QUEUE_NAMES[queueName]];
+    if (!queue) throw new Error("Generation queues have been removed.");
+    return queue.add(name, payload, options);
   }
 
   public addIngestJob(payload: Record<string, unknown>) {
@@ -40,7 +42,7 @@ export class QueueService {
   public async addAutomationJob(payload: Record<string, unknown>, options?: JobsOptions) {
     const jobId = options?.jobId == null ? undefined : String(options.jobId);
     if (jobId) {
-      const existing = await this.queues[QUEUE_NAMES.AUTOMATION].getJob(jobId);
+      const existing = await this.queues[QUEUE_NAMES.AUTOMATION]?.getJob(jobId);
       if (existing && await existing.isFailed()) await existing.remove();
       else if (existing) return existing;
     }
@@ -55,7 +57,7 @@ export class QueueService {
       return;
     }
 
-    const queueJob = await this.queues[queueName].getJob(externalJobId);
+    const queueJob = await this.queues[queueName]?.getJob(externalJobId);
     if (!queueJob) {
       return;
     }

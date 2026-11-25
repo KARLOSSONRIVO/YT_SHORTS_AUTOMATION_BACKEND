@@ -15,7 +15,7 @@ import { QueueService } from "../queue/queue.service";
 import { RenderService } from "../render/render.service";
 import { SourceVideoService } from "../sourceVideo/source-video.service";
 import { StorageService } from "../storage/storage.service";
-import { SubtitleService } from "../subtitle/subtitle.service";
+import { buildSubtitleSrt, clipSubtitleSegments, SubtitleService } from "../subtitle/subtitle.service";
 import { TranscriptService } from "../transcript/transcript.service";
 
 interface IngestPayload {
@@ -48,46 +48,6 @@ interface PublishPayload {
   description: string;
   privacyStatus: "private" | "public" | "unlisted";
 }
-
-interface PythonSubtitleSegment {
-  start: number;
-  end: number;
-  text: string;
-}
-
-const srtTimestamp = (seconds: number): string => {
-  const totalMilliseconds = Math.max(Math.round(seconds * 1000), 0);
-  const hours = Math.floor(totalMilliseconds / 3_600_000);
-  const minutes = Math.floor((totalMilliseconds % 3_600_000) / 60_000);
-  const secs = Math.floor((totalMilliseconds % 60_000) / 1000);
-  const milliseconds = totalMilliseconds % 1000;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(
-    2,
-    "0"
-  )},${String(milliseconds).padStart(3, "0")}`;
-};
-
-const buildClipSubtitleSrt = (
-  subtitles: PythonSubtitleSegment[],
-  clipStart: number,
-  clipEnd: number
-): string => {
-  const relevantSegments = subtitles
-    .filter((segment) => segment.end > clipStart && segment.start < clipEnd)
-    .map((segment) => ({
-      start: Math.max(segment.start - clipStart, 0),
-      end: Math.max(Math.min(segment.end, clipEnd) - clipStart, 0.1),
-      text: segment.text.trim()
-    }))
-    .filter((segment) => segment.text.length > 0);
-
-  return relevantSegments
-    .map(
-      (segment, index) =>
-        `${index + 1}\n${srtTimestamp(segment.start)} --> ${srtTimestamp(segment.end)}\n${segment.text}`
-    )
-    .join("\n\n");
-};
 
 const extractVideoDimensions = (media: PythonMediaMetadata) => {
   const videoStream = media.streams.find((stream) => stream.codec_type === "video");
@@ -303,7 +263,7 @@ export class WorkflowOrchestratorService {
           return;
         }
 
-        const subtitleContent = buildClipSubtitleSrt(response.subtitles, originalClip.start, originalClip.end);
+        const subtitleContent = buildSubtitleSrt(clipSubtitleSegments(response.subtitles, originalClip.start, originalClip.end));
 
         if (subtitleContent.trim().length > 0) {
           await this.subtitleService.saveClipSubtitle(projectId, clip.id, subtitleContent);

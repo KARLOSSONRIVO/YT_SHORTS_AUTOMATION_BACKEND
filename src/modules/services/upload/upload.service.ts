@@ -10,6 +10,7 @@ import type { ProjectSubtitlePreferences } from "../../models/project.model";
 import { isYouTubeSourceUrl } from "../../validators/upload.validator";
 
 export interface CreateUploadWorkflowInput {
+  preset?: ProjectSubtitlePreferences["preset"];
   userId: string;
   title: string;
   description?: string;
@@ -56,6 +57,7 @@ export class UploadService {
       hashtags: input.hashtags,
       targetClipCount: input.targetClipCount,
       subtitlePreferences: {
+        preset: input.preset,
         fontFamily: input.fontFamily,
         fontSize: input.fontSize,
         fillColor: input.fillColor,

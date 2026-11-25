@@ -29,16 +29,11 @@ import { TranscriptRepository } from "../modules/repositories/transcript.reposit
 import { UploadHistoryRepository } from "../modules/repositories/upload-history.repository";
 import { UserRepository } from "../modules/repositories/user.repository";
 import { AutomationRepository } from "../modules/repositories/automation.repository";
-import { AutomationService } from "../modules/automation/automation.service";
-import { NicheConfigService } from "../modules/automation/niche-config.service";
-import { TopicResearchService } from "../modules/automation/topic-research.service";
 import { MediaInspectionService } from "../modules/automation/media-inspection.service";
-import { AutomationRunCoordinator } from "../modules/automation/automation-run-coordinator";
 import { AuthService } from "../modules/services/auth/auth.service";
 import { AuthTokenService } from "../modules/services/auth/auth-token.service";
 import { ChannelService } from "../modules/services/channel/channel.service";
 import { ClipService } from "../modules/services/clip/clip.service";
-import { FacelessVideoService } from "../modules/services/facelessVideo/faceless-video.service";
 import { JobService } from "../modules/services/job/job.service";
 import { ProjectService } from "../modules/services/project/project.service";
 import { ProjectCleanupService } from "../modules/services/project/project-cleanup.service";
@@ -52,7 +47,7 @@ import { TranscriptService } from "../modules/services/transcript/transcript.ser
 import { UploadService } from "../modules/services/upload/upload.service";
 import { WorkflowOrchestratorService } from "../modules/services/workflow/workflow-orchestrator.service";
 import { YouTubeService } from "../modules/services/youtube/youtube.service";
-import { RedditApiClient, RedditService } from "../modules/services/reddit/reddit.service";
+import { ClipAutomationService } from "../modules/automation/clip-automation.service";
 import { ClipQueueService } from "../modules/services/clipQueue/clip-queue.service";
 
 export const createApplicationContainer = async () => {
@@ -82,31 +77,24 @@ export const createApplicationContainer = async () => {
   const sourceVideoRepository = new SourceVideoRepository();
   const uploadHistoryRepository = new UploadHistoryRepository();
   const automationRepository = new AutomationRepository();
-  const automationRunCoordinator = new AutomationRunCoordinator(redisConnection, {
-    maxConcurrentProjects: env.AUTOMATION_MAX_CONCURRENT_PROJECTS,
-    staleMs: env.AUTOMATION_RUN_STALE_MS
-  });
+
 
   const storageService = new StorageService(storageClient);
-  const youtubeSourceDownloader = new YouTubeSourceDownloader(env.YTDLP_PATH, undefined, env.YTDLP_TIMEOUT_MS);
+  const youtubeSourceDownloader = new YouTubeSourceDownloader(
+    env.YTDLP_PATH, undefined, env.YTDLP_TIMEOUT_MS
+  );
   await storageService.ensureReady();
   await fs.mkdir(env.TEMP_UPLOAD_DIR, { recursive: true });
 
   const authTokenService = new AuthTokenService(env.AUTH_TOKEN_SECRET, env.AUTH_TOKEN_TTL_DAYS * 24 * 60 * 60);
   const authService = new AuthService(userRepository, authTokenService);
   const projectService = new ProjectService(projectRepository);
-  const sourceVideoService = new SourceVideoService(sourceVideoRepository);
+  const mediaInspectionService = new MediaInspectionService(env.FFPROBE_PATH, env.FFMPEG_PATH);
+  const sourceVideoService = new SourceVideoService(sourceVideoRepository, storageService, mediaInspectionService);
   const transcriptService = new TranscriptService(transcriptRepository, configuredPythonWorkerClient);
   const clipService = new ClipService(clipRepository);
   const queueService = new QueueService(queues);
   const jobService = new JobService(jobRepository);
-  const facelessVideoService = new FacelessVideoService(
-    projectService,
-    jobService,
-    queueService,
-    configuredPythonWorkerClient,
-    facelessVideoRepository
-  );
   const uploadService = new UploadService(
     storageService,
     projectService,
@@ -125,9 +113,8 @@ export const createApplicationContainer = async () => {
     jobService,
     queueService
   );
-  const subtitleService = new SubtitleService(clipRepository, clipService, storageService);
+  const subtitleService = new SubtitleService(clipService, storageService, transcriptService);
   const youTubeService = new YouTubeService(youTubeClient);
-  const redditService = new RedditService(new RedditApiClient(env.REDDIT_USER_AGENT));
   const channelService = new ChannelService(channelRepository, youTubeService);
   const publishService = new PublishService(
     clipService,
@@ -141,23 +128,9 @@ export const createApplicationContainer = async () => {
     facelessVideoRepository,
     configuredPythonWorkerClient
   );
-  const nicheConfigService = new NicheConfigService();
-  await nicheConfigService.ensureSeeded();
-  const topicResearchService = new TopicResearchService(
-    env.GROQ_API_KEY,
-    env.GROQ_TOPIC_RESEARCH_MODEL,
-    env.GROQ_API_BASE_URL,
-    [
-      env.GROQ_TOPIC_RESEARCH_FALLBACK_MODEL,
-      env.GROQ_TOPIC_RESEARCH_SECONDARY_FALLBACK_MODEL
-    ]
-  );
-  const mediaInspectionService = new MediaInspectionService(env.FFPROBE_PATH, env.FFMPEG_PATH);
   const clipQueueService = new ClipQueueService(projectService, storageService, mediaInspectionService,
     channelRepository, youTubeService, uploadHistoryRepository, automationRepository);
-  const automationService = new AutomationService(automationRepository, nicheConfigService, topicResearchService,
-    channelRepository, facelessVideoService, projectService, facelessVideoRepository, publishService, queueService,
-    mediaInspectionService, redditService, clipQueueService, automationRunCoordinator);
+  const automationService = new ClipAutomationService(automationRepository, channelRepository, projectService, clipQueueService);
   const workflowOrchestratorService = new WorkflowOrchestratorService(
     projectService,
     sourceVideoService,
@@ -235,10 +208,7 @@ export const createApplicationContainer = async () => {
   await publishService.backfillPublishedArchives();
 
   const uploadMiddleware = multer({
-    dest: env.TEMP_UPLOAD_DIR,
-    limits: {
-      fileSize: env.MAX_FILE_SIZE_BYTES
-    }
+    dest: env.TEMP_UPLOAD_DIR
   });
   const authMiddleware = createRequireAuth(authTokenService, userRepository);
 
@@ -256,7 +226,6 @@ export const createApplicationContainer = async () => {
       queueService,
       jobService,
       uploadService,
-      facelessVideoService,
       renderService,
       subtitleService,
       youTubeService,
@@ -264,15 +233,15 @@ export const createApplicationContainer = async () => {
       publishService,
       storageService,
       workflowOrchestratorService
-      ,automationService, redditService, clipQueueService
+      ,automationService, clipQueueService
     },
     controllers: {
       authController: new AuthController(authService),
       healthController: new HealthController(redisConnection),
       uploadController: new UploadController(uploadService),
       projectController: new ProjectController(projectService, automationService, projectCleanupService,
-        nicheConfigService, redditService, clipQueueService),
-      subtitleController: new SubtitleController(subtitleService),
+        clipQueueService),
+      subtitleController: new SubtitleController(subtitleService, clipService, projectService),
       channelController: new ChannelController(channelService),
       publishController: new PublishController(publishService),
       jobController: new JobController(jobService),

@@ -2,7 +2,8 @@ import type IORedis from "ioredis";
 import { Queue, type JobsOptions } from "bullmq";
 import { QUEUE_NAMES, type QueueName } from "./queue.names";
 
-export type QueueRegistry = Record<QueueName, Queue>;
+type GenerationQueueName = typeof QUEUE_NAMES.STORY | typeof QUEUE_NAMES.AUTOMATION;
+export type QueueRegistry = Record<Exclude<QueueName, GenerationQueueName>, Queue> & Partial<Record<GenerationQueueName, Queue>>;
 
 const defaultJobOptions: JobsOptions = {
   attempts: 3,
@@ -16,10 +17,8 @@ export const createQueues = (connection: IORedis): QueueRegistry => {
     [QUEUE_NAMES.INGEST]: new Queue(QUEUE_NAMES.INGEST, { connection, defaultJobOptions }),
     [QUEUE_NAMES.TRANSCRIPTION]: new Queue(QUEUE_NAMES.TRANSCRIPTION, { connection, defaultJobOptions }),
     [QUEUE_NAMES.ANALYSIS]: new Queue(QUEUE_NAMES.ANALYSIS, { connection, defaultJobOptions }),
-    [QUEUE_NAMES.STORY]: new Queue(QUEUE_NAMES.STORY, { connection, defaultJobOptions }),
     [QUEUE_NAMES.RENDER]: new Queue(QUEUE_NAMES.RENDER, { connection, defaultJobOptions }),
     [QUEUE_NAMES.UPLOAD]: new Queue(QUEUE_NAMES.UPLOAD, { connection, defaultJobOptions }),
-    [QUEUE_NAMES.AUTOMATION]: new Queue(QUEUE_NAMES.AUTOMATION, { connection, defaultJobOptions })
   };
 };
 

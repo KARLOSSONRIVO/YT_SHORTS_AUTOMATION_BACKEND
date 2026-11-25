@@ -17,6 +17,14 @@ export class ClipRepository {
     return ClipModel.findByIdAndUpdate(clipId, update, { new: true }).exec();
   }
 
+  public approveEditedClip(clipId: string, edits: Partial<Clip>): Promise<ClipDocument | null> {
+    return ClipModel.findOneAndUpdate(
+      { _id: clipId, reviewStatus: "pending_review", publishStatus: "not_ready", outputStorageKey: null },
+      { ...edits, reviewStatus: "approved", publishStatus: "queued" },
+      { new: true }
+    ).exec();
+  }
+
   public deleteByProjectId(projectId: string) {
     return ClipModel.deleteMany({ projectId }).exec();
   }

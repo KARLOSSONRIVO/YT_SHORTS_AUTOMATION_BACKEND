@@ -4,6 +4,14 @@ const execFileAsync = promisify(execFile);
 
 export class MediaInspectionService {
   constructor(private readonly ffprobePath: string, private readonly ffmpegPath: string) {}
+
+  public async readDurationSeconds(filePath: string) {
+    const { stdout } = await execFileAsync(this.ffprobePath, [
+      "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath
+    ]);
+    return Number(stdout.trim());
+  }
+
   public async inspect(filePath: string) {
     const { stdout } = await execFileAsync(this.ffprobePath, ["-v","error","-show_streams","-show_format","-of","json",filePath]);
     const data = JSON.parse(stdout) as { streams?: Array<{codec_type?:string;width?:number;height?:number}>; format?: {duration?:string} };

@@ -25,7 +25,7 @@ ENV NODE_ENV=production
 
 RUN apk add --no-cache ffmpeg python3 py3-pip \
   && python3 -m venv /opt/yt-dlp \
-  && /opt/yt-dlp/bin/pip install --no-cache-dir yt-dlp
+  && /opt/yt-dlp/bin/pip install --no-cache-dir 'yt-dlp[default]'
 
 ENV YTDLP_PATH=/opt/yt-dlp/bin/yt-dlp
 

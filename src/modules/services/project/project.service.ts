@@ -67,7 +67,7 @@ export class ProjectService {
       title: input.title,
       description: input.description,
       hashtags: input.hashtags,
-      targetClipCount: input.targetClipCount ?? 5,
+      targetClipCount: input.targetClipCount,
       projectType: "uploaded_video",
       contentType: "CLIP_UPLOAD",
       platforms: ["youtube"],

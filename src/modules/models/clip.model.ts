@@ -1,6 +1,13 @@
 import { HydratedDocument, Schema, Types, model } from "mongoose";
 
+import type { CaptionPlacement, VerticalLayout } from "../validators/clip.validator";
+import { CAPTION_FONT_SIZE, CAPTION_PRESETS, type CaptionPreset } from "./project.model";
+
 export interface Clip {
+  captionPlacement?: CaptionPlacement;
+  captionPreset?: CaptionPreset;
+  captionFontSize?: number;
+  verticalLayout?: VerticalLayout;
   projectId: Types.ObjectId;
   sourceVideoId: Types.ObjectId;
   transcriptId?: Types.ObjectId;
@@ -10,6 +17,7 @@ export interface Clip {
   startTimeSeconds: number;
   endTimeSeconds: number;
   durationSeconds: number;
+  rangeEdited?: boolean;
   score: number;
   reviewStatus: "pending_review" | "approved" | "rejected";
   renderStatus: "queued" | "rendering" | "rendered" | "failed";
@@ -31,6 +39,10 @@ const clipSchema = new Schema<Clip>(
     startTimeSeconds: { type: Number, required: true },
     endTimeSeconds: { type: Number, required: true },
     durationSeconds: { type: Number, required: true },
+    rangeEdited: { type: Boolean },
+    captionPlacement: { type: new Schema<CaptionPlacement>({ x: Number, y: Number }, { _id: false }) },
+    captionPreset: { type: String, enum: CAPTION_PRESETS },
+    captionFontSize: { type: Number, min: CAPTION_FONT_SIZE.min, max: CAPTION_FONT_SIZE.max },
     score: { type: Number, required: true, default: 0 },
     reviewStatus: {
       type: String,
@@ -40,6 +52,7 @@ const clipSchema = new Schema<Clip>(
     },
     renderStatus: { type: String, enum: ["queued", "rendering", "rendered", "failed"], default: "queued" },
     publishStatus: { type: String, enum: ["not_ready", "queued", "published", "failed"], default: "not_ready" },
+    verticalLayout: { type: Schema.Types.Mixed },
     outputStorageKey: { type: String },
     subtitleStorageKey: { type: String },
     analysisReason: { type: String },
